@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+{% block title %}Browse Projects{% endblock %}
+
+{% block head %}
+<style>
+  .project-card { border-left: 3px solid #e2e8f0; transition: border-color .15s, box-shadow .15s; }
+  .project-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.08); border-left-color: #0d6efd; }
+  .teaser-text {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    color: #64748b;
+  }
+  .modal-section-label {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .06em; color: #64748b; margin-bottom: 6px;
+  }
+  .formatted-text { font-size: 14px; line-height: 1.75; color: #334155; }
+  .formatted-text p { margin-bottom: 0.65rem; }
+  .formatted-text p:last-child { margin-bottom: 0; }
+  .formatted-text ul, .formatted-text ol { padding-left: 1.4rem; margin-bottom: 0.65rem; }
+  .formatted-text li { margin-bottom: 0.2rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+  <div class="col">
+    <h2 class="mb-1">Available Projects</h2>
+    <p class="text-muted mb-0">{{ projects|length }} projects published. Click <strong>View details</strong> on any card to read the full description and expected outcomes.</p>
+  </div>
+</div>
+
+<!-- Filter bar -->
+<div class="card mb-3">
+  <div class="card-body py-2">
+    <div class="row g-2 align-items-end">
+      <div class="col-12 col-md-5">
+        <input type="text" id="search" class="form-control form-control-sm" placeholder="Search by title, sector, problem type or keyword…" />
+      </div>
+      <div class="col-6 col-md-3">
+        <select id="filter-industry" class="form-select form-select-sm">
+          <option value="">All Industries</option>
+          {% for industry in industries %}
+          <option value="{{ industry }}">{{ industry }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-3">
+        <select id="filter-type" class="form-select form-select-sm">
+          <option value="">All Problem Types</option>
+          {% for pt in problem_types %}
+          <option value="{{ pt }}">{{ pt }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-sm btn-outline-secondary" id="reset-btn">Reset</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p id="result-count" class="text-muted small mb-2"></p>
+
+{% if not projects %}
+<div class="text-center py-5 text-muted">
+  <p class="fs-5">No projects have been published yet.</p>
+</div>
+{% else %}
+
+<div id="projects-list">
+  {% for project in projects %}
+  <div class="card project-card mb-2"
+       data-pid="{{ project.elp_project_id }}"
+       data-industry="{{ project.industry_sector }}"
+       data-type="{{ project.problem_type }}"
+       data-search="{{ (project.elp_project_id ~ ' ' ~ project.title ~ ' ' ~ project.industry_sector ~ ' ' ~ project.problem_type ~ ' ' ~ project.problem_description ~ ' ' ~ project.expected_outcomes)|lower }}">
+    <div class="card-body py-2 px-3">
+      <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+        <span class="fw-bold small text-dark">{{ project.elp_project_id }}</span>
+        <span class="small text-secondary">{{ project.title }}</span>
+        <span class="badge rounded-pill px-2" style="background:#dbeafe;color:#1d4ed8;font-size:10px;">{{ project.industry_sector }}</span>
+        <span class="badge rounded-pill px-2" style="background:#dcfce7;color:#166534;font-size:10px;">{{ project.problem_type }}</span>
+      </div>
+      <p class="teaser-text small mb-1">{{ project.problem_description }}</p>
+      <a href="#" class="small text-primary view-details" data-pid="{{ project.elp_project_id }}">View details →</a>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div id="no-results" class="text-center py-5 d-none">
+  <p class="text-muted">No projects match your filters. <a href="#" id="reset-link">Reset filters</a></p>
+</div>
+{% endif %}
+
+<!-- Shared detail modal -->
+<div class="modal fade" id="projectModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header border-0 pb-0">
+        <div class="flex-grow-1">
+          <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+            <span id="modal-pid" class="fw-bold text-dark"></span>
+            <span id="modal-industry" class="badge rounded-pill px-2" style="background:#dbeafe;color:#1d4ed8;font-size:11px;"></span>
+            <span id="modal-type"     class="badge rounded-pill px-2" style="background:#dcfce7;color:#166534;font-size:11px;"></span>
+          </div>
+          <h5 class="modal-title mb-0" id="modal-title"></h5>
+        </div>
+        <button type="button" class="btn-close ms-3" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body pt-3">
+        <p class="modal-section-label">Problem Description</p>
+        <div id="modal-description" class="formatted-text mb-4"></div>
+        <hr class="my-3" />
+        <p class="modal-section-label">Expected Outcomes</p>
+        <div id="modal-outcomes" class="formatted-text mb-0"></div>
+      </div>
+      <div class="modal-footer border-0">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+        <a href="/register" class="btn btn-primary btn-sm">Register to Submit Preferences →</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PROJECT_DATA = {{ projects_json | safe }};
+const bsModal = new bootstrap.Modal(document.getElementById('projectModal'));
+
+function formatText(raw) {
+  if (!raw) return '';
+  const text = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const blocks = text.split(/\n{2,}/);
+  return blocks.map(block => {
+    const lines = block.split('\n').map(l => l.trim()).filter(l => l);
+    if (!lines.length) return '';
+    const isBullet   = l => /^[-•*–]\s+/.test(l);
+    const isNumbered = l => /^\d+[.)]\s+/.test(l);
+    const isLettered = l => /^(\([a-zA-Z]\)|[a-zA-Z][.)])\s+/.test(l);
+    if (lines.some(isBullet) || lines.some(isNumbered) || lines.some(isLettered)) {
+      let html = '', listType = null;
+      const closeList = () => {
+        if (listType === 'ul') html += '</ul>';
+        if (listType === 'ol') html += '</ol>';
+        if (listType === 'al') html += '</ol>';
+        listType = null;
+      };
+      lines.forEach(l => {
+        if (isBullet(l)) {
+          if (listType !== 'ul') { closeList(); html += '<ul>'; listType = 'ul'; }
+          html += `<li>${l.replace(/^[-•*–]\s+/, '')}</li>`;
+        } else if (isNumbered(l)) {
+          if (listType !== 'ol') { closeList(); html += '<ol>'; listType = 'ol'; }
+          html += `<li>${l.replace(/^\d+[.)]\s+/, '')}</li>`;
+        } else if (isLettered(l)) {
+          if (listType !== 'al') { closeList(); html += '<ol type="a">'; listType = 'al'; }
+          html += `<li>${l.replace(/^(\([a-zA-Z]\)|[a-zA-Z][.)])\s+/, '')}</li>`;
+        } else {
+          closeList();
+          html += `<p>${l}</p>`;
+        }
+      });
+      closeList();
+      return html;
+    }
+    return `<p>${lines.join('<br>')}</p>`;
+  }).join('');
+}
+
+document.querySelectorAll('.view-details').forEach(link => {
+  link.addEventListener('click', e => {
+    e.preventDefault();
+    const pid = link.dataset.pid;
+    const p   = PROJECT_DATA[pid];
+    if (!p) return;
+    document.getElementById('modal-pid').textContent      = pid;
+    document.getElementById('modal-title').textContent    = p.title;
+    document.getElementById('modal-industry').textContent = p.industry_sector;
+    document.getElementById('modal-type').textContent     = p.problem_type;
+    document.getElementById('modal-description').innerHTML = formatText(p.problem_description);
+    document.getElementById('modal-outcomes').innerHTML    = formatText(p.expected_outcomes);
+    bsModal.show();
+  });
+});
+
+const cards     = Array.from(document.querySelectorAll('.project-card'));
+const searchEl  = document.getElementById('search');
+const indFilter = document.getElementById('filter-industry');
+const typeFilter= document.getElementById('filter-type');
+const countEl   = document.getElementById('result-count');
+const noResults = document.getElementById('no-results');
+
+function applyFilters() {
+  const q   = searchEl.value.toLowerCase().trim();
+  const ind = indFilter.value.toLowerCase();
+  const typ = typeFilter.value.toLowerCase();
+  let visible = 0;
+  cards.forEach(card => {
+    const show = (!q || card.dataset.search.includes(q)) &&
+                 (!ind || card.dataset.industry.toLowerCase() === ind) &&
+                 (!typ || card.dataset.type.toLowerCase() === typ);
+    card.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+  if (countEl) countEl.textContent = `Showing ${visible} of ${cards.length} projects`;
+  if (noResults) noResults.classList.toggle('d-none', visible > 0);
+}
+
+function resetFilters() { searchEl.value = ''; indFilter.value = ''; typeFilter.value = ''; applyFilters(); }
+searchEl.addEventListener('input', applyFilters);
+indFilter.addEventListener('change', applyFilters);
+typeFilter.addEventListener('change', applyFilters);
+document.getElementById('reset-btn').addEventListener('click', resetFilters);
+const resetLink = document.getElementById('reset-link');
+if (resetLink) resetLink.addEventListener('click', e => { e.preventDefault(); resetFilters(); });
+
+applyFilters();
+</script>
+{% endblock %}

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Submitted — {{ group.group_id }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+<div class="col-lg-6">
+
+  <div class="text-center py-4">
+    <div style="font-size:3.5rem;color:#16a34a;">&#10003;</div>
+    <h2 class="mt-2 mb-1">Preferences Submitted!</h2>
+    <p class="text-muted">
+      Group <strong>{{ group.group_id }}</strong> — your top 10 project preferences have been recorded.<br />
+      You will receive your final project assignment by email.
+    </p>
+    <a href="/submit/{{ group.group_id }}/download" class="btn btn-success mt-1">
+      &#11015; Download My Preference List
+    </a>
+  </div>
+
+  {% if prefs %}
+  <div class="card mt-2">
+    <div class="card-header fw-semibold bg-white">Your Submitted Preferences</div>
+    <ul class="list-group list-group-flush">
+      {% for pref in prefs %}
+      <li class="list-group-item d-flex align-items-center gap-3">
+        <span class="badge rounded-pill fw-bold px-2 py-1"
+              style="background:{% if loop.index <= 3 %}#7c3aed{% else %}#0d6efd{% endif %};color:#fff;min-width:28px;text-align:center;">
+          {{ loop.index }}
+        </span>
+        <div>
+          <div class="fw-semibold small">{{ pref.elp_project_id }} &nbsp;·&nbsp; {{ pref.project.title }}</div>
+          <div class="text-muted" style="font-size:11px;">
+            {{ pref.project.problem_type }} &nbsp;·&nbsp; {{ pref.project.industry_sector }}
+          </div>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <div class="text-center mt-4">
+    <a href="/" class="btn btn-outline-secondary">Back to Projects</a>
+  </div>
+
+</div>
+</div>
+{% endblock %}

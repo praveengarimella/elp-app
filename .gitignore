@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+*.pyc
+elp.db
+.DS_Store
+~$*
+.env
