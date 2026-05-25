@@ -12,7 +12,11 @@ if DATABASE_URL.startswith("sqlite+libsql://"):
     if DATABASE_AUTH_TOKEN and "authToken=" not in url:
         sep = "&" if "?" in url else "?"
         url = f"{url}{sep}authToken={DATABASE_AUTH_TOKEN}"
+    if "secure=" not in url:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}secure=true"
     engine = create_engine(url)
+
 elif DATABASE_URL.startswith("sqlite://"):
     # Connect to local SQLite file
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
