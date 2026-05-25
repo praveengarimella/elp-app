@@ -25,14 +25,13 @@ if DATABASE_URL.startswith("sqlite+libsql://"):
     if query_str:
         url = f"{url}?{query_str}"
         
-    if DATABASE_AUTH_TOKEN and "authToken=" not in url:
-        sep = "&" if "?" in url else "?"
-        url = f"{url}{sep}authToken={DATABASE_AUTH_TOKEN}"
     if "secure=" not in url:
         sep = "&" if "?" in url else "?"
         url = f"{url}{sep}secure=true"
         
-    engine = create_engine(url)
+    # Pass auth_token directly inside connect_args to ensure the underlying libsql driver receives it properly
+    engine = create_engine(url, connect_args={"auth_token": DATABASE_AUTH_TOKEN})
+
 
 
 elif DATABASE_URL.startswith("sqlite://"):
