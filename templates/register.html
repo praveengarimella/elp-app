@@ -58,20 +58,45 @@
       <div class="card-header fw-semibold bg-white">Group Members</div>
       <div class="card-body">
         <p class="text-muted small mb-3">
-          Student 1 should be the group representative (whose roll number you used above).
+          As the group representative, your details are locked as Student 1. Please provide details for all 5 members.
         </p>
-        {% for i in range(1, 6) %}
+        
+        <!-- Student 1 (Locked) -->
         <div class="row g-2 mb-3 align-items-end">
+          <div class="col-auto d-flex align-items-center pt-4">
+            <span class="badge rounded-pill bg-primary" style="width:26px;height:26px;line-height:18px;font-size:12px;">1</span>
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label small mb-1">Full Name <span class="text-danger">*</span></label>
+            <input type="text" class="form-control form-control-sm" name="s1_name" value="{{ user_name }}" required readonly style="background-color: #e9ecef;" />
+          </div>
+          <div class="col-12 col-md-3">
+            <label class="form-label small mb-1">Roll Number <span class="text-danger">*</span></label>
+            <input type="text" class="form-control form-control-sm" name="s1_roll" id="s1_roll" placeholder="Your roll number" required autocomplete="off" />
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label small mb-1">Email Address <span class="text-danger">*</span></label>
+            <input type="email" class="form-control form-control-sm" name="s1_email_disabled" value="{{ user_email }}" disabled style="background-color: #e9ecef;" />
+          </div>
+        </div>
+
+        <!-- Students 2-5 -->
+        {% for i in range(2, 6) %}
+        <div class="row g-2 mb-3 align-items-end border-top pt-3">
           <div class="col-auto d-flex align-items-center pt-4">
             <span class="badge rounded-pill bg-secondary" style="width:26px;height:26px;line-height:18px;font-size:12px;">{{ i }}</span>
           </div>
-          <div class="col">
+          <div class="col-12 col-md-4">
             <label class="form-label small mb-1">Full Name <span class="text-danger">*</span></label>
             <input type="text" class="form-control form-control-sm" name="s{{ i }}_name" placeholder="Full name" required />
           </div>
-          <div class="col">
+          <div class="col-12 col-md-3">
             <label class="form-label small mb-1">Roll Number <span class="text-danger">*</span></label>
             <input type="text" class="form-control form-control-sm" name="s{{ i }}_roll" placeholder="Roll number" required />
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label small mb-1">Email Address <span class="text-danger">*</span></label>
+            <input type="email" class="form-control form-control-sm" name="s{{ i }}_email" placeholder="e.g. name@isb.edu" required />
           </div>
         </div>
         {% endfor %}
@@ -81,11 +106,6 @@
     <div class="d-grid mb-2">
       <button type="submit" class="btn btn-primary btn-lg">Register &amp; Get My Submission Link</button>
     </div>
-    <p class="text-center text-muted small">
-      Already registered?
-      Enter your Group ID: <strong>ELP</strong> + roll number and go to
-      <code>/submit/&lt;your-group-id&gt;</code>
-    </p>
   </form>
 
 </div>
@@ -96,9 +116,16 @@
 <script>
 const suffix = document.getElementById('group_id_suffix');
 const preview = document.getElementById('group-id-preview');
+const s1Roll = document.getElementById('s1_roll');
+
 suffix.addEventListener('input', function () {
   const val = this.value.trim().toUpperCase();
   preview.textContent = val ? 'Your Group ID will be: ELP' + val : '';
+});
+
+s1Roll.addEventListener('input', function () {
+  suffix.value = this.value.trim();
+  suffix.dispatchEvent(new Event('input'));
 });
 </script>
 {% endblock %}

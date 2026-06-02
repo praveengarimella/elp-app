@@ -3,7 +3,11 @@ import json
 import os
 import re
 import secrets
+import urllib.parse
 from datetime import datetime
+import httpx
+from starlette.middleware.sessions import SessionMiddleware
+
 
 
 def natural_key(project):
@@ -52,9 +56,48 @@ from sqlalchemy.orm import Session
 from database import Base, engine, get_db
 from models import Group, Preference, Project
 
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
 Base.metadata.create_all(bind=engine)
 
+# Database schema migration for groups table (adding email columns if missing)
+db = Session(bind=engine)
+try:
+    columns_info = db.execute(text("PRAGMA table_info(groups)")).fetchall()
+    column_names = [col[1] for col in columns_info]
+    
+    if "student_1_email" not in column_names:
+        print("Migrating database: Adding student email columns to 'groups' table...")
+        db.execute(text("ALTER TABLE groups ADD COLUMN student_1_email VARCHAR"))
+        db.execute(text("ALTER TABLE groups ADD COLUMN student_2_email VARCHAR"))
+        db.execute(text("ALTER TABLE groups ADD COLUMN student_3_email VARCHAR"))
+        db.execute(text("ALTER TABLE groups ADD COLUMN student_4_email VARCHAR"))
+        db.execute(text("ALTER TABLE groups ADD COLUMN student_5_email VARCHAR"))
+        db.commit()
+        print("Database migration completed successfully!")
+except Exception as e:
+    print(f"Error checking/running database migration: {e}")
+finally:
+    db.close()
+
+
 app = FastAPI()
+
+SESSION_SECRET = os.environ.get("SESSION_SECRET", "isb-elp-app-secure-session-key-2027")
+app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
+
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+
+def get_redirect_uri(request: Request) -> str:
+    env_uri = os.environ.get("OAUTH_REDIRECT_URI", "")
+    if env_uri:
+        return env_uri
+    proto = request.headers.get("x-forwarded-proto", "http")
+    host = request.headers.get("host", "localhost:8000")
+    return f"{proto}://{host}/auth/callback"
+
 templates = Jinja2Templates(directory="templates")
 security = HTTPBasic()
 
@@ -75,6 +118,9 @@ def require_admin(credentials: HTTPBasicCredentials = Depends(security)):
 
 @app.get("/", response_class=HTMLResponse)
 def browse_projects(request: Request, db: Session = Depends(get_db)):
+    user_email = request.session.get("user_email")
+    user_name = request.session.get("user_name")
+    
     projects = sorted(db.query(Project).all(), key=natural_key)
     industries = sorted({p.industry_sector for p in projects if p.industry_sector})
     problem_types = sorted({p.problem_type for p in projects if p.problem_type})
@@ -88,18 +134,187 @@ def browse_projects(request: Request, db: Session = Depends(get_db)):
         }
         for p in projects
     })
+    
+    # Check if the user is already part of a registered group
+    user_group_id = None
+    if user_email:
+        group = db.query(Group).filter(
+            or_(
+                Group.student_1_email == user_email,
+                Group.student_2_email == user_email,
+                Group.student_3_email == user_email,
+                Group.student_4_email == user_email,
+                Group.student_5_email == user_email,
+            )
+        ).first()
+        if group:
+            user_group_id = group.group_id
+            
     return templates.TemplateResponse("projects.html", {
         "request": request,
         "projects": projects,
         "industries": industries,
         "problem_types": problem_types,
         "projects_json": projects_json,
+        "user_email": user_email,
+        "user_name": user_name,
+        "user_group_id": user_group_id
     })
 
 
+@app.get("/landing-login", response_class=HTMLResponse)
+def landing_login(request: Request):
+    user_email = request.session.get("user_email")
+    if user_email:
+        return RedirectResponse(url="/", status_code=303)
+    return templates.TemplateResponse("login.html", {"request": request})
+
+
+@app.get("/login")
+def login(request: Request):
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=500, detail="GOOGLE_CLIENT_ID environment variable is not set.")
+    
+    redirect_uri = get_redirect_uri(request)
+    state = secrets.token_urlsafe(16)
+    request.session["oauth_state"] = state
+    
+    google_auth_url = (
+        "https://accounts.google.com/o/oauth2/v2/auth"
+        "?response_type=code"
+        f"&client_id={GOOGLE_CLIENT_ID}"
+        f"&redirect_uri={urllib.parse.quote(redirect_uri)}"
+        "&scope=openid%20email%20profile"
+        f"&state={state}"
+        "&prompt=select_account"
+    )
+    return RedirectResponse(url=google_auth_url)
+
+
+@app.get("/auth/callback")
+async def auth_callback(request: Request, code: str = None, state: str = None, error: str = None, db: Session = Depends(get_db)):
+    if error:
+        return templates.TemplateResponse("login.html", {"request": request, "error": f"Google Sign-In failed: {error}"}, status_code=400)
+    
+    if not code or not state:
+        return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid auth request. Missing code or state."}, status_code=400)
+    
+    # Verify state
+    saved_state = request.session.pop("oauth_state", None)
+    if not saved_state or saved_state != state:
+        return templates.TemplateResponse("login.html", {"request": request, "error": "Session expired or state mismatch. Please try again."}, status_code=400)
+    
+    redirect_uri = get_redirect_uri(request)
+    
+    # Exchange code for tokens
+    async with httpx.AsyncClient() as client:
+        try:
+            token_response = await client.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "code": code,
+                    "client_id": GOOGLE_CLIENT_ID,
+                    "client_secret": GOOGLE_CLIENT_SECRET,
+                    "redirect_uri": redirect_uri,
+                    "grant_type": "authorization_code",
+                },
+                timeout=10.0,
+            )
+            token_data = token_response.json()
+            if "error" in token_data:
+                return templates.TemplateResponse("login.html", {"request": request, "error": f"Token exchange failed: {token_data.get('error_description', token_data['error'])}"}, status_code=400)
+            
+            access_token = token_data.get("access_token")
+            if not access_token:
+                return templates.TemplateResponse("login.html", {"request": request, "error": "Failed to retrieve access token from Google."}, status_code=400)
+            
+            # Fetch user info
+            userinfo_response = await client.get(
+                "https://www.googleapis.com/oauth2/v3/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=10.0,
+            )
+            user_info = userinfo_response.json()
+        except Exception as e:
+            return templates.TemplateResponse("login.html", {"request": request, "error": f"Network error during authentication: {e}"}, status_code=500)
+            
+    email = user_info.get("email", "").strip().lower()
+    name = user_info.get("name", "").strip()
+    picture = user_info.get("picture", "")
+    
+    if not email:
+        return templates.TemplateResponse("login.html", {"request": request, "error": "Google profile did not return a valid email address."}, status_code=400)
+    
+    # Verify domain restriction: Only members from isb.edu are allowed.
+    allowed_domains = ["isb.edu"]
+    is_allowed = False
+    for domain in allowed_domains:
+        if email.endswith(f"@{domain}") or email.endswith(f".{domain}"):
+            is_allowed = True
+            break
+            
+    # Dev bypasses for testing
+    if email.endswith("@pg.fju.us") or "praveengarimella" in email or "vishal" in email:
+        is_allowed = True
+        
+    if not is_allowed:
+        return templates.TemplateResponse("login.html", {
+            "request": request,
+            "error": f"Access restricted. Email '{email}' does not belong to the @isb.edu domain."
+        }, status_code=403)
+        
+    # User is authorized! Set session
+    request.session["user_email"] = email
+    request.session["user_name"] = name
+    request.session["user_picture"] = picture
+    
+    # Check if the user is already part of a group
+    group = db.query(Group).filter(
+        or_(
+            Group.student_1_email == email,
+            Group.student_2_email == email,
+            Group.student_3_email == email,
+            Group.student_4_email == email,
+            Group.student_5_email == email,
+        )
+    ).first()
+    
+    if group:
+        return RedirectResponse(url=f"/submit/{group.group_id}", status_code=303)
+    else:
+        return RedirectResponse(url="/register", status_code=303)
+
+
+@app.get("/logout")
+def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse(url="/", status_code=303)
+
+
 @app.get("/register", response_class=HTMLResponse)
-def register_form(request: Request):
-    return templates.TemplateResponse("register.html", {"request": request})
+def register_form(request: Request, db: Session = Depends(get_db)):
+    user_email = request.session.get("user_email")
+    if not user_email:
+        return RedirectResponse(url="/landing-login", status_code=303)
+        
+    # Check if user is already in a group
+    group = db.query(Group).filter(
+        or_(
+            Group.student_1_email == user_email,
+            Group.student_2_email == user_email,
+            Group.student_3_email == user_email,
+            Group.student_4_email == user_email,
+            Group.student_5_email == user_email,
+        )
+    ).first()
+    if group:
+        return RedirectResponse(url=f"/submit/{group.group_id}", status_code=303)
+        
+    return templates.TemplateResponse("register.html", {
+        "request": request,
+        "user_email": user_email,
+        "user_name": request.session.get("user_name", "")
+    })
 
 
 @app.post("/register")
@@ -108,12 +323,24 @@ async def register_group(
     db: Session = Depends(get_db),
     group_id_suffix: str = Form(...),
     s1_name: str = Form(...), s1_roll: str = Form(...),
-    s2_name: str = Form(...), s2_roll: str = Form(...),
-    s3_name: str = Form(...), s3_roll: str = Form(...),
-    s4_name: str = Form(...), s4_roll: str = Form(...),
-    s5_name: str = Form(...), s5_roll: str = Form(...),
+    s2_name: str = Form(...), s2_roll: str = Form(...), s2_email: str = Form(...),
+    s3_name: str = Form(...), s3_roll: str = Form(...), s3_email: str = Form(...),
+    s4_name: str = Form(...), s4_roll: str = Form(...), s4_email: str = Form(...),
+    s5_name: str = Form(...), s5_roll: str = Form(...), s5_email: str = Form(...),
 ):
+    user_email = request.session.get("user_email")
+    if not user_email:
+        return RedirectResponse(url="/landing-login", status_code=303)
+        
     group_id = "ELP" + group_id_suffix.strip().upper()
+    s1_email = user_email
+    
+    s2_email = s2_email.strip().lower()
+    s3_email = s3_email.strip().lower()
+    s4_email = s4_email.strip().lower()
+    s5_email = s5_email.strip().lower()
+    
+    emails = [s1_email, s2_email, s3_email, s4_email, s5_email]
     rolls = [r.strip() for r in [s1_roll, s2_roll, s3_roll, s4_roll, s5_roll]]
 
     def render_register(error=None, already_exists=False, existing_group_id=None):
@@ -122,41 +349,71 @@ async def register_group(
             "error": error,
             "already_exists": already_exists,
             "existing_group_id": existing_group_id,
+            "user_email": user_email,
+            "user_name": request.session.get("user_name", "")
         }, status_code=400)
 
-    # Same group ID already registered
+    # 1. Enforce that all email domains are isb.edu (with dev bypass)
+    for email in emails:
+        is_allowed = False
+        if email.endswith("@isb.edu") or email.endswith(".isb.edu") or email.endswith("@pg.fju.us") or "praveengarimella" in email or "vishal" in email:
+            is_allowed = True
+        if not is_allowed:
+            return render_register(error=f"All group member emails must belong to the @isb.edu domain. Checked: {email}")
+
+    # 2. Check for duplicate emails within the form
+    if len(set(emails)) != 5:
+        return render_register(error="Duplicate student emails detected. Each group member must have a unique email.")
+
+    # 3. Same group ID already registered
     existing = db.query(Group).filter(Group.group_id == group_id).first()
     if existing:
         if existing.is_submitted:
-            # Already submitted — tell them clearly and give a link
             return render_register(
-                error=f"Group {group_id} has already submitted preferences. "
-                      f"You can view your submission at the link below."
-            , already_exists=True, existing_group_id=group_id)
-        else:
-            # Registered but not submitted — send them to continue
-            return RedirectResponse(url=f"/submit/{group_id}", status_code=303)
-
-    # Check if any roll number already appears in a submitted group
-    submitted_groups = db.query(Group).filter(Group.is_submitted == True).all()
-    for g in submitted_groups:
-        existing_rolls = {g.student_1_roll, g.student_2_roll, g.student_3_roll,
-                          g.student_4_roll, g.student_5_roll}
-        overlap = set(rolls) & existing_rolls
-        if overlap:
-            roll_list = ", ".join(overlap)
-            return render_register(
-                error=f"Roll number(s) {roll_list} have already submitted preferences "
-                      f"as part of group {g.group_id}. Each student can only be in one group."
+                error=f"Group {group_id} has already submitted preferences. You can view your submission at the link below.",
+                already_exists=True,
+                existing_group_id=group_id
             )
+        else:
+            if user_email in [existing.student_1_email, existing.student_2_email, existing.student_3_email, existing.student_4_email, existing.student_5_email]:
+                return RedirectResponse(url=f"/submit/{group_id}", status_code=303)
+            else:
+                return render_register(error=f"Group {group_id} is already registered by another representative.")
+
+    # 4. Check if any member (roll OR email) is already registered in ANY group
+    for email in emails:
+        already_in_group = db.query(Group).filter(
+            or_(
+                Group.student_1_email == email,
+                Group.student_2_email == email,
+                Group.student_3_email == email,
+                Group.student_4_email == email,
+                Group.student_5_email == email,
+            )
+        ).first()
+        if already_in_group:
+            return render_register(error=f"Student email {email} is already registered in group {already_in_group.group_id}.")
+
+    for r in rolls:
+        already_in_group = db.query(Group).filter(
+            or_(
+                Group.student_1_roll == r,
+                Group.student_2_roll == r,
+                Group.student_3_roll == r,
+                Group.student_4_roll == r,
+                Group.student_5_roll == r,
+            )
+        ).first()
+        if already_in_group:
+            return render_register(error=f"Student roll number {r} is already registered in group {already_in_group.group_id}.")
 
     group = Group(
         group_id=group_id,
-        student_1_name=s1_name.strip(), student_1_roll=rolls[0],
-        student_2_name=s2_name.strip(), student_2_roll=rolls[1],
-        student_3_name=s3_name.strip(), student_3_roll=rolls[2],
-        student_4_name=s4_name.strip(), student_4_roll=rolls[3],
-        student_5_name=s5_name.strip(), student_5_roll=rolls[4],
+        student_1_name=s1_name.strip(), student_1_roll=rolls[0], student_1_email=s1_email,
+        student_2_name=s2_name.strip(), student_2_roll=rolls[1], student_2_email=s2_email,
+        student_3_name=s3_name.strip(), student_3_roll=rolls[2], student_3_email=s3_email,
+        student_4_name=s4_name.strip(), student_4_roll=rolls[3], student_4_email=s4_email,
+        student_5_name=s5_name.strip(), student_5_roll=rolls[4], student_5_email=s5_email,
         is_submitted=False,
     )
     db.add(group)
@@ -166,9 +423,18 @@ async def register_group(
 
 @app.get("/submit/{group_id}", response_class=HTMLResponse)
 def submit_page(group_id: str, request: Request, db: Session = Depends(get_db)):
+    user_email = request.session.get("user_email")
+    if not user_email:
+        return RedirectResponse(url="/landing-login", status_code=303)
+        
     group = db.query(Group).filter(Group.group_id == group_id).first()
     if not group:
         return templates.TemplateResponse("not_found.html", {"request": request}, status_code=404)
+
+    # Secure authorization check
+    member_emails = [group.student_1_email, group.student_2_email, group.student_3_email, group.student_4_email, group.student_5_email]
+    if user_email not in member_emails:
+        return HTMLResponse("<h1>403 Forbidden</h1><p>You do not have permission to access this group's workspace.</p>", status_code=403)
 
     if group.is_submitted:
         prefs = sorted(group.preferences, key=lambda x: x.rank)
@@ -176,6 +442,8 @@ def submit_page(group_id: str, request: Request, db: Session = Depends(get_db)):
             "request": request,
             "group": group,
             "prefs": prefs,
+            "user_email": user_email,
+            "user_name": request.session.get("user_name", "")
         })
 
     projects = sorted(db.query(Project).all(), key=natural_key)
@@ -199,6 +467,8 @@ def submit_page(group_id: str, request: Request, db: Session = Depends(get_db)):
         "industries": industries,
         "problem_types": problem_types,
         "projects_json": projects_json,
+        "user_email": user_email,
+        "user_name": request.session.get("user_name", "")
     })
 
 
@@ -213,9 +483,19 @@ async def submit_preferences(
     pref_7: str = Form(...), pref_8: str = Form(...),
     pref_9: str = Form(...), pref_10: str = Form(...),
 ):
+    user_email = request.session.get("user_email")
+    if not user_email:
+        return RedirectResponse(url="/landing-login", status_code=303)
+        
     group = db.query(Group).filter(Group.group_id == group_id).first()
     if not group:
         return templates.TemplateResponse("not_found.html", {"request": request}, status_code=404)
+        
+    # Secure authorization check
+    member_emails = [group.student_1_email, group.student_2_email, group.student_3_email, group.student_4_email, group.student_5_email]
+    if user_email not in member_emails:
+        return HTMLResponse("<h1>403 Forbidden</h1><p>You do not have permission to modify this group's preferences.</p>", status_code=403)
+
     if group.is_submitted:
         return RedirectResponse(url=f"/submit/{group_id}", status_code=303)
 
@@ -232,6 +512,8 @@ async def submit_preferences(
             "problem_types": sorted({p.problem_type for p in projects}),
             "projects_json": json.dumps({p.elp_project_id: {"title": p.title, "problem_type": p.problem_type, "industry_sector": p.industry_sector, "problem_description": p.problem_description, "expected_outcomes": p.expected_outcomes} for p in projects}),
             "error": "Duplicate projects detected. Please ensure all 10 preferences are different.",
+            "user_email": user_email,
+            "user_name": request.session.get("user_name", "")
         }, status_code=400)
 
     for rank, pid in enumerate(prefs, start=1):
@@ -244,10 +526,19 @@ async def submit_preferences(
 
 
 @app.get("/submit/{group_id}/download")
-def download_preferences(group_id: str, db: Session = Depends(get_db)):
+def download_preferences(group_id: str, request: Request, db: Session = Depends(get_db)):
+    user_email = request.session.get("user_email")
+    if not user_email:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+        
     group = db.query(Group).filter(Group.group_id == group_id).first()
     if not group or not group.is_submitted:
         raise HTTPException(status_code=404)
+
+    # Secure authorization check
+    member_emails = [group.student_1_email, group.student_2_email, group.student_3_email, group.student_4_email, group.student_5_email]
+    if user_email not in member_emails:
+        raise HTTPException(status_code=403, detail="Forbidden")
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -257,15 +548,15 @@ def download_preferences(group_id: str, db: Session = Depends(get_db)):
     ws.append(["Group ID", group.group_id])
     ws.append(["Submitted At", group.submitted_at.strftime("%d %b %Y, %H:%M")])
     ws.append([])
-    ws.append(["#", "Student Name", "Roll Number"])
-    for i, (name, roll) in enumerate([
-        (group.student_1_name, group.student_1_roll),
-        (group.student_2_name, group.student_2_roll),
-        (group.student_3_name, group.student_3_roll),
-        (group.student_4_name, group.student_4_roll),
-        (group.student_5_name, group.student_5_roll),
+    ws.append(["#", "Student Name", "Roll Number", "Email Address"])
+    for i, (name, roll, email) in enumerate([
+        (group.student_1_name, group.student_1_roll, group.student_1_email),
+        (group.student_2_name, group.student_2_roll, group.student_2_email),
+        (group.student_3_name, group.student_3_roll, group.student_3_email),
+        (group.student_4_name, group.student_4_roll, group.student_4_email),
+        (group.student_5_name, group.student_5_roll, group.student_5_email),
     ], start=1):
-        ws.append([i, name, roll])
+        ws.append([i, name, roll, email])
 
     ws.append([])
     ws.append(["Rank", "Project ID", "Title", "Problem Type", "Industry Sector"])
@@ -294,6 +585,7 @@ def download_preferences(group_id: str, db: Session = Depends(get_db)):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
 
 
 # ---------------------------------------------------------------------------
@@ -399,9 +691,11 @@ def export_preferences(db: Session = Depends(get_db), _=Depends(require_admin)):
     ws1.title = "Preferences"
     ws1.append([
         "Group ID",
-        "S1 Name", "S1 Roll", "S2 Name", "S2 Roll",
-        "S3 Name", "S3 Roll", "S4 Name", "S4 Roll",
-        "S5 Name", "S5 Roll",
+        "S1 Name", "S1 Roll", "S1 Email",
+        "S2 Name", "S2 Roll", "S2 Email",
+        "S3 Name", "S3 Roll", "S3 Email",
+        "S4 Name", "S4 Roll", "S4 Email",
+        "S5 Name", "S5 Roll", "S5 Email",
         "Pref 1", "Pref 2", "Pref 3", "Pref 4", "Pref 5",
         "Pref 6", "Pref 7", "Pref 8", "Pref 9", "Pref 10",
         "Submitted At",
@@ -414,14 +708,15 @@ def export_preferences(db: Session = Depends(get_db), _=Depends(require_admin)):
             pref_ids.append("")
         ws1.append([
             group.group_id,
-            group.student_1_name, group.student_1_roll,
-            group.student_2_name, group.student_2_roll,
-            group.student_3_name, group.student_3_roll,
-            group.student_4_name, group.student_4_roll,
-            group.student_5_name, group.student_5_roll,
+            group.student_1_name, group.student_1_roll, group.student_1_email,
+            group.student_2_name, group.student_2_roll, group.student_2_email,
+            group.student_3_name, group.student_3_roll, group.student_3_email,
+            group.student_4_name, group.student_4_roll, group.student_4_email,
+            group.student_5_name, group.student_5_roll, group.student_5_email,
             *pref_ids,
             group.submitted_at.strftime("%Y-%m-%d %H:%M:%S"),
         ])
+
 
     # Sheet 2 — group / project pairs for matching algorithm
     ws2 = wb.create_sheet(title="Group-Project Pairs")

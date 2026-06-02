@@ -22,18 +22,24 @@ class Group(Base):
     group_id = Column(String, unique=True, nullable=False, index=True)
     student_1_name = Column(String, nullable=False)
     student_1_roll = Column(String, nullable=False)
+    student_1_email = Column(String, nullable=True)
     student_2_name = Column(String, nullable=False)
     student_2_roll = Column(String, nullable=False)
+    student_2_email = Column(String, nullable=True)
     student_3_name = Column(String, nullable=False)
     student_3_roll = Column(String, nullable=False)
+    student_3_email = Column(String, nullable=True)
     student_4_name = Column(String, nullable=False)
     student_4_roll = Column(String, nullable=False)
+    student_4_email = Column(String, nullable=True)
     student_5_name = Column(String, nullable=False)
     student_5_roll = Column(String, nullable=False)
+    student_5_email = Column(String, nullable=True)
     is_submitted = Column(Boolean, default=False, nullable=False)
     submitted_at = Column(DateTime, nullable=True)
 
     preferences = relationship("Preference", back_populates="group", order_by="Preference.rank")
+
 
 
 class Preference(Base):
