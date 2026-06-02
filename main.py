@@ -120,6 +120,8 @@ def require_admin(credentials: HTTPBasicCredentials = Depends(security)):
 @app.get("/", response_class=HTMLResponse)
 def browse_projects(request: Request, db: Session = Depends(get_db)):
     user_email = request.session.get("user_email")
+    if not user_email:
+        return RedirectResponse(url="/landing-login", status_code=303)
     user_name = request.session.get("user_name")
     
     projects = sorted(db.query(Project).all(), key=natural_key)
