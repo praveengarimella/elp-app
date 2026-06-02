@@ -89,6 +89,7 @@ app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
 
 MICROSOFT_CLIENT_ID = os.environ.get("MICROSOFT_CLIENT_ID", "")
 MICROSOFT_CLIENT_SECRET = os.environ.get("MICROSOFT_CLIENT_SECRET", "")
+MICROSOFT_TENANT_ID = os.environ.get("MICROSOFT_TENANT_ID", "isb.edu")
 
 
 def get_redirect_uri(request: Request) -> str:
@@ -183,7 +184,7 @@ def login(request: Request):
     request.session["oauth_state"] = state
     
     microsoft_auth_url = (
-        "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
+        f"https://login.microsoftonline.com/{MICROSOFT_TENANT_ID}/oauth2/v2.0/authorize"
         "?response_type=code"
         f"&client_id={MICROSOFT_CLIENT_ID}"
         f"&redirect_uri={urllib.parse.quote(redirect_uri)}"
@@ -215,7 +216,7 @@ async def auth_callback(request: Request, code: str = None, state: str = None, e
     async with httpx.AsyncClient() as client:
         try:
             token_response = await client.post(
-                "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+                f"https://login.microsoftonline.com/{MICROSOFT_TENANT_ID}/oauth2/v2.0/token",
                 data={
                     "code": code,
                     "client_id": MICROSOFT_CLIENT_ID,
