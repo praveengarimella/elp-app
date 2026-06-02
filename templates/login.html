@@ -76,7 +76,7 @@
     margin-bottom: 2.5rem;
   }
 
-  .btn-google {
+  .btn-microsoft {
     background: #ffffff;
     color: #1e293b;
     font-weight: 600;
@@ -94,7 +94,7 @@
     text-decoration: none;
   }
 
-  .btn-google:hover {
+  .btn-microsoft:hover {
     background: #f8fafc;
     color: #0f172a;
     transform: translateY(-2px);
@@ -102,9 +102,8 @@
     border-color: #cbd5e1;
   }
 
-  .btn-google img {
-    width: 20px;
-    height: 20px;
+  .btn-microsoft svg {
+    flex-shrink: 0;
   }
 
   .restriction-alert {
@@ -163,9 +162,14 @@
     </div>
     {% endif %}
 
-    <a href="/login" class="btn-google">
-      <img src="https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_%22G%22_logo.svg" alt="Google Logo" />
-      Sign in with Google
+    <a href="/login" class="btn-microsoft">
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 23 23">
+        <rect x="0" y="0" width="11" height="11" fill="#f25022"/>
+        <rect x="12" y="0" width="11" height="11" fill="#7fba00"/>
+        <rect x="0" y="12" width="11" height="11" fill="#00a4ef"/>
+        <rect x="12" y="12" width="11" height="11" fill="#ffb900"/>
+      </svg>
+      Sign in with Microsoft
     </a>
 
     <div class="restriction-alert">

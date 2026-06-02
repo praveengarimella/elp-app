@@ -87,8 +87,9 @@ app = FastAPI()
 SESSION_SECRET = os.environ.get("SESSION_SECRET", "isb-elp-app-secure-session-key-2027")
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
 
-GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
-GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+MICROSOFT_CLIENT_ID = os.environ.get("MICROSOFT_CLIENT_ID", "")
+MICROSOFT_CLIENT_SECRET = os.environ.get("MICROSOFT_CLIENT_SECRET", "")
+
 
 def get_redirect_uri(request: Request) -> str:
     env_uri = os.environ.get("OAUTH_REDIRECT_URI", "")
@@ -172,29 +173,31 @@ def landing_login(request: Request):
 
 @app.get("/login")
 def login(request: Request):
-    if not GOOGLE_CLIENT_ID:
-        raise HTTPException(status_code=500, detail="GOOGLE_CLIENT_ID environment variable is not set.")
+    if not MICROSOFT_CLIENT_ID:
+        raise HTTPException(status_code=500, detail="MICROSOFT_CLIENT_ID environment variable is not set.")
     
     redirect_uri = get_redirect_uri(request)
     state = secrets.token_urlsafe(16)
     request.session["oauth_state"] = state
     
-    google_auth_url = (
-        "https://accounts.google.com/o/oauth2/v2/auth"
+    microsoft_auth_url = (
+        "https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
         "?response_type=code"
-        f"&client_id={GOOGLE_CLIENT_ID}"
+        f"&client_id={MICROSOFT_CLIENT_ID}"
         f"&redirect_uri={urllib.parse.quote(redirect_uri)}"
-        "&scope=openid%20email%20profile"
+        "&response_mode=query"
+        "&scope=openid%20profile%20email%20User.Read"
         f"&state={state}"
         "&prompt=select_account"
     )
-    return RedirectResponse(url=google_auth_url)
+    return RedirectResponse(url=microsoft_auth_url)
 
 
 @app.get("/auth/callback")
 async def auth_callback(request: Request, code: str = None, state: str = None, error: str = None, db: Session = Depends(get_db)):
     if error:
-        return templates.TemplateResponse("login.html", {"request": request, "error": f"Google Sign-In failed: {error}"}, status_code=400)
+        error_desc = request.query_params.get("error_description", error)
+        return templates.TemplateResponse("login.html", {"request": request, "error": f"Microsoft Sign-In failed: {error_desc}"}, status_code=400)
     
     if not code or not state:
         return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid auth request. Missing code or state."}, status_code=400)
@@ -210,11 +213,11 @@ async def auth_callback(request: Request, code: str = None, state: str = None, e
     async with httpx.AsyncClient() as client:
         try:
             token_response = await client.post(
-                "https://oauth2.googleapis.com/token",
+                "https://login.microsoftonline.com/common/oauth2/v2.0/token",
                 data={
                     "code": code,
-                    "client_id": GOOGLE_CLIENT_ID,
-                    "client_secret": GOOGLE_CLIENT_SECRET,
+                    "client_id": MICROSOFT_CLIENT_ID,
+                    "client_secret": MICROSOFT_CLIENT_SECRET,
                     "redirect_uri": redirect_uri,
                     "grant_type": "authorization_code",
                 },
@@ -226,11 +229,11 @@ async def auth_callback(request: Request, code: str = None, state: str = None, e
             
             access_token = token_data.get("access_token")
             if not access_token:
-                return templates.TemplateResponse("login.html", {"request": request, "error": "Failed to retrieve access token from Google."}, status_code=400)
+                return templates.TemplateResponse("login.html", {"request": request, "error": "Failed to retrieve access token from Microsoft."}, status_code=400)
             
-            # Fetch user info
+            # Fetch user info from Microsoft Graph
             userinfo_response = await client.get(
-                "https://www.googleapis.com/oauth2/v3/userinfo",
+                "https://graph.microsoft.com/v1.0/me",
                 headers={"Authorization": f"Bearer {access_token}"},
                 timeout=10.0,
             )
@@ -238,12 +241,13 @@ async def auth_callback(request: Request, code: str = None, state: str = None, e
         except Exception as e:
             return templates.TemplateResponse("login.html", {"request": request, "error": f"Network error during authentication: {e}"}, status_code=500)
             
-    email = user_info.get("email", "").strip().lower()
-    name = user_info.get("name", "").strip()
-    picture = user_info.get("picture", "")
+    # Resolve email (mail is preferred, userPrincipalName is the login fallback)
+    email = user_info.get("mail") or user_info.get("userPrincipalName", "")
+    email = email.strip().lower()
+    name = user_info.get("displayName", "").strip()
     
     if not email:
-        return templates.TemplateResponse("login.html", {"request": request, "error": "Google profile did not return a valid email address."}, status_code=400)
+        return templates.TemplateResponse("login.html", {"request": request, "error": "Microsoft profile did not return a valid email address."}, status_code=400)
     
     # Verify domain restriction: Only members from isb.edu are allowed.
     allowed_domains = ["isb.edu"]
@@ -266,7 +270,7 @@ async def auth_callback(request: Request, code: str = None, state: str = None, e
     # User is authorized! Set session
     request.session["user_email"] = email
     request.session["user_name"] = name
-    request.session["user_picture"] = picture
+    request.session["user_picture"] = ""
     
     # Check if the user is already part of a group
     group = db.query(Group).filter(
@@ -283,6 +287,7 @@ async def auth_callback(request: Request, code: str = None, state: str = None, e
         return RedirectResponse(url=f"/submit/{group.group_id}", status_code=303)
     else:
         return RedirectResponse(url="/register", status_code=303)
+
 
 
 @app.get("/logout")
