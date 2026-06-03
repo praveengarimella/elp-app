@@ -1,5 +1,6 @@
 import os
 from sqlalchemy import create_engine
+from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./elp.db")
@@ -30,7 +31,8 @@ if DATABASE_URL.startswith("sqlite+libsql://"):
         url = f"{url}{sep}secure=true"
         
     # Pass auth_token directly inside connect_args to ensure the underlying libsql driver receives it properly
-    engine = create_engine(url, connect_args={"auth_token": DATABASE_AUTH_TOKEN})
+    # Use NullPool to disable connection pooling and prevent remote 'stream not found' errors on idle connections
+    engine = create_engine(url, connect_args={"auth_token": DATABASE_AUTH_TOKEN}, poolclass=NullPool)
 
 
 
