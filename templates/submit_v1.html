@@ -1,0 +1,494 @@
+{% extends "base.html" %}
+{% block title %}Submit Preferences — {{ group.group_id }}{% endblock %}
+
+{% block head %}
+<style>
+  /* Layout */
+  .browse-col  { padding-right: 1.5rem; }
+  .sidebar-col { padding-left: 0.5rem; }
+
+  /* Project cards */
+  .project-card { border-left: 3px solid #e2e8f0; transition: border-color .15s, box-shadow .15s; cursor: default; }
+  .project-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+  .project-card.shortlisted { border-left-color: #e11d48; background: #fff8f9; }
+
+  /* Heart button */
+  .heart-btn {
+    background: none; border: none;
+    font-size: 20px; line-height: 1; cursor: pointer;
+    color: #cbd5e1; padding: 2px 4px;
+    transition: color .15s, transform .12s;
+    flex-shrink: 0; margin-top: 1px;
+  }
+  .heart-btn:hover { transform: scale(1.3); color: #e11d48; }
+  .heart-btn.hearted { color: #e11d48; }
+
+  /* Teaser text — clamp to 2 lines */
+  .teaser-text {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    color: #64748b;
+  }
+
+  /* Sidebar */
+  .shortlist-sidebar {
+    position: sticky; top: 16px;
+    max-height: calc(100vh - 32px);
+    display: flex; flex-direction: column;
+  }
+  .shortlist-scroll { overflow-y: auto; flex: 1; min-height: 60px; }
+
+  /* Shortlist items */
+  .shortlist-item {
+    background: #f8fafc; border: 1px solid #e2e8f0;
+    border-radius: 6px; padding: 6px 8px; margin-bottom: 4px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .shortlist-item.over10 { opacity: 0.4; }
+  .rank-dot {
+    width: 20px; height: 20px; border-radius: 50%;
+    background: #0d6efd; color: #fff;
+    font-size: 14px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .rank-dot.grey { background: #94a3b8; }
+  .item-label { flex: 1; min-width: 0; }
+  .item-label .pid  { font-weight: 600; font-size: 11px; color: #1e293b; }
+  .item-label .meta { font-size: 10px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .btn-remove {
+    background: none; border: none; color: #cbd5e1;
+    font-size: 15px; line-height: 1; cursor: pointer; padding: 0 2px; flex-shrink: 0;
+  }
+  .btn-remove:hover { color: #e11d48; }
+
+  /* Modal */
+  .modal-section-label {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .06em; color: #64748b; margin-bottom: 6px;
+  }
+  .formatted-text { font-size: 14px; line-height: 1.75; color: #334155; }
+  .formatted-text p { margin-bottom: 0.65rem; }
+  .formatted-text p:last-child { margin-bottom: 0; }
+  .formatted-text ul, .formatted-text ol { padding-left: 1.4rem; margin-bottom: 0.65rem; }
+  .formatted-text li { margin-bottom: 0.2rem; }
+
+  @media (max-width: 991px) {
+    .shortlist-sidebar { position: static; max-height: none; }
+    .browse-col, .sidebar-col { padding: 0 12px; }
+    .sidebar-col { margin-top: 24px; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+
+{% if error %}
+<div class="alert alert-danger alert-dismissible mb-3">
+  {{ error }}
+  <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+
+<!-- Group banner -->
+<div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+  <div>
+    <h2 class="mb-0">Choose 10 Projects</h2>
+    <span class="text-muted small">
+      Group <strong>{{ group.group_id }}</strong> &nbsp;·&nbsp;
+      {{ group.student_1_name }}, {{ group.student_2_name }}, {{ group.student_3_name }},
+      {{ group.student_4_name }}, {{ group.student_5_name }}
+    </span>
+  </div>
+</div>
+
+<div class="row">
+
+  <!-- ── Browse panel ──────────────────────────────── -->
+  <div class="col-lg-8 browse-col">
+
+    <!-- Filter bar -->
+    <div class="card mb-3">
+      <div class="card-body py-2">
+        <div class="row g-2 align-items-end">
+          <div class="col-12 col-md-5">
+            <input type="text" id="search" class="form-control form-control-sm" placeholder="Search by title, sector, problem type or keyword…" />
+          </div>
+          <div class="col-6 col-md-3">
+            <select id="filter-industry" class="form-select form-select-sm">
+              <option value="">All Industries</option>
+              {% for ind in industries %}<option value="{{ ind }}">{{ ind }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="col-6 col-md-3">
+            <select id="filter-type" class="form-select form-select-sm">
+              <option value="">All Problem Types</option>
+              {% for pt in problem_types %}<option value="{{ pt }}">{{ pt }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="col-auto">
+            <button class="btn btn-sm btn-outline-secondary" id="reset-btn">Reset</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p id="result-count" class="text-muted small mb-2"></p>
+
+    {% if not projects %}
+    <div class="text-center text-muted py-5">No projects published yet.</div>
+    {% else %}
+    <div id="projects-list">
+      {% for project in projects %}
+      <div class="card project-card mb-2"
+           data-id="{{ project.elp_project_id }}"
+           data-industries="{{ project.industry_type_1 }}{% if project.industry_type_2 %}|{{ project.industry_type_2 }}{% endif %}"
+           data-types="{{ project.problem_category_1 }}{% if project.problem_category_2 %}|{{ project.problem_category_2 }}{% endif %}{% if project.problem_category_3 %}|{{ project.problem_category_3 }}{% endif %}"
+           data-search="{{ (project.elp_project_id ~ ' ' ~ project.title ~ ' ' ~ project.industry_type_1 ~ ' ' ~ (project.industry_type_2 or '') ~ ' ' ~ project.problem_category_1 ~ ' ' ~ (project.problem_category_2 or '') ~ ' ' ~ (project.problem_category_3 or '') ~ ' ' ~ project.problem_description ~ ' ' ~ project.expected_outcomes)|lower }}">
+        <div class="card-body py-2 px-3">
+          <div class="d-flex align-items-start gap-2">
+            <button class="heart-btn" data-pid="{{ project.elp_project_id }}" title="Shortlist this project">♡</button>
+            <div class="flex-grow-1 min-width-0">
+              <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+                <span class="fw-bold small text-dark">{{ project.elp_project_id }}</span>
+                <span class="small text-slate-600">{{ project.title }}</span>
+                <span class="badge rounded-pill px-2" style="background:#dbeafe;color:#1d4ed8;font-size:10px;">{{ project.industry_type_1 }}</span>
+                {% if project.industry_type_2 %}<span class="badge rounded-pill px-2" style="background:#dbeafe;color:#1d4ed8;font-size:10px;">{{ project.industry_type_2 }}</span>{% endif %}
+                <span class="badge rounded-pill px-2" style="background:#dcfce7;color:#166534;font-size:10px;">{{ project.problem_category_1 }}</span>
+                {% if project.problem_category_2 %}<span class="badge rounded-pill px-2" style="background:#dcfce7;color:#166534;font-size:10px;">{{ project.problem_category_2 }}</span>{% endif %}
+                {% if project.problem_category_3 %}<span class="badge rounded-pill px-2" style="background:#dcfce7;color:#166534;font-size:10px;">{{ project.problem_category_3 }}</span>{% endif %}
+              </div>
+              <p class="teaser-text small mb-1">{{ project.problem_description }}</p>
+              <a href="#" class="small text-primary view-details" data-pid="{{ project.elp_project_id }}">View details →</a>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div id="no-results" class="text-center py-4 text-muted d-none">
+      No projects match — <a href="#" id="reset-link">reset filters</a>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ── Shortlist sidebar ─────────────────────────── -->
+  <div class="col-lg-4 sidebar-col">
+    <div class="shortlist-sidebar">
+      <div class="card flex-grow-1 d-flex flex-column" style="overflow:hidden;">
+
+        <div class="card-header bg-white py-2">
+          <div class="d-flex justify-content-between align-items-center">
+            <span class="fw-semibold">Your Shortlist</span>
+            <div class="d-flex align-items-center gap-2">
+              <button id="clear-btn" class="btn btn-sm btn-outline-danger py-0 px-2" style="font-size:11px;display:none;">Clear all</button>
+              <span id="shortlist-count" class="badge bg-secondary rounded-pill">0</span>
+            </div>
+          </div>
+          <div class="mt-1">
+            <div class="progress" style="height:5px;">
+              <div id="progress-bar" class="progress-bar" style="width:0%"></div>
+            </div>
+            <p id="shortlist-status" class="small text-muted mb-0 mt-1" style="font-size:11px;">Shortlist at least 10 projects to submit.</p>
+          </div>
+        </div>
+
+        <div class="shortlist-scroll px-3 pt-2 pb-1">
+          <div id="shortlist-items">
+            <p class="text-muted small text-center py-3">Click ♡ on any project to add it here.</p>
+          </div>
+        </div>
+
+        <div class="card-footer bg-white pt-2">
+          <p class="small text-muted mb-2" style="font-size:11px;">
+            You can add more than 10 to browse freely — only your <strong>first 10 selections</strong> will be submitted.
+          </p>
+          <form method="POST" action="/submit/{{ token }}" id="pref-form">
+            {% for i in range(1, 11) %}
+            <input type="hidden" name="pref_{{ i }}" id="pref_{{ i }}" value="" />
+            {% endfor %}
+            <div class="d-grid">
+              <button type="button" id="submit-btn" class="btn btn-primary btn-sm" disabled>
+                Submit Top 10 Preferences
+              </button>
+            </div>
+          </form>
+          <p class="small text-muted mt-2 mb-0 text-center" style="font-size:10px;">
+            Cannot be changed after submission.
+          </p>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Shared project detail modal ────────────────── -->
+<div class="modal fade" id="projectModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header border-0 pb-0">
+        <div class="flex-grow-1">
+          <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
+            <span id="modal-pid" class="fw-bold text-dark"></span>
+            <span id="modal-industry-badges"></span>
+            <span id="modal-type-badges"></span>
+          </div>
+          <h5 class="modal-title mb-0" id="modal-title"></h5>
+        </div>
+        <button type="button" class="btn-close ms-3" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body pt-3">
+        <p class="modal-section-label">Problem Description</p>
+        <div id="modal-description" class="formatted-text mb-4"></div>
+        <hr class="my-3" />
+        <p class="modal-section-label">Expected Outcomes</p>
+        <div id="modal-outcomes" class="formatted-text mb-0"></div>
+      </div>
+      <div class="modal-footer border-0 pt-0">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Close</button>
+        <button type="button" id="modal-heart-btn" class="btn btn-sm btn-outline-danger">♡ Add to Shortlist</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const GROUP_ID     = "{{ group.group_id }}";
+const LS_KEY       = "elp_shortlist_" + GROUP_ID;
+const PROJECT_DATA = {{ projects_json | safe }};
+
+let shortlist = [];
+let modalPid = null;
+const bsModal = new bootstrap.Modal(document.getElementById('projectModal'));
+
+// ── Persistence ──────────────────────────────────────────────────────────────
+function loadShortlist() {
+  try { shortlist = JSON.parse(localStorage.getItem(LS_KEY) || "[]"); } catch { shortlist = []; }
+}
+function saveShortlist() { localStorage.setItem(LS_KEY, JSON.stringify(shortlist)); }
+
+// ── Toggle ────────────────────────────────────────────────────────────────────
+function toggleShortlist(pid) {
+  const idx = shortlist.indexOf(pid);
+  if (idx === -1) shortlist.push(pid); else shortlist.splice(idx, 1);
+  saveShortlist(); renderShortlist(); syncHearts();
+}
+function removeItem(pid) {
+  shortlist = shortlist.filter(id => id !== pid);
+  saveShortlist(); renderShortlist(); syncHearts();
+}
+
+// ── Sync hearts on browse cards ───────────────────────────────────────────────
+function syncHearts() {
+  document.querySelectorAll('.heart-btn').forEach(btn => {
+    const on = shortlist.includes(btn.dataset.pid);
+    btn.classList.toggle('hearted', on);
+    btn.textContent = on ? '♥' : '♡';
+    btn.title = on ? 'Remove from shortlist' : 'Add to shortlist';
+  });
+  document.querySelectorAll('.project-card').forEach(card => {
+    card.classList.toggle('shortlisted', shortlist.includes(card.dataset.id));
+  });
+  if (modalPid) updateModalHeart();
+}
+
+function updateModalHeart() {
+  const btn = document.getElementById('modal-heart-btn');
+  const on  = shortlist.includes(modalPid);
+  btn.textContent = on ? '♥ Remove from Shortlist' : '♡ Add to Shortlist';
+  btn.className   = on ? 'btn btn-sm btn-danger' : 'btn btn-sm btn-outline-danger';
+}
+
+// ── Render shortlist panel ────────────────────────────────────────────────────
+function renderShortlist() {
+  const container  = document.getElementById('shortlist-items');
+  const countBadge = document.getElementById('shortlist-count');
+  const statusEl   = document.getElementById('shortlist-status');
+  const submitBtn  = document.getElementById('submit-btn');
+  const bar        = document.getElementById('progress-bar');
+  const clearBtn   = document.getElementById('clear-btn');
+
+  clearBtn.style.display = shortlist.length > 0 ? '' : 'none';
+
+  if (shortlist.length === 0) {
+    container.innerHTML = '<p class="text-muted small text-center py-3">Click ♡ on any project to add it here.</p>';
+    countBadge.textContent = "0";
+    bar.style.width = "0%"; bar.className = "progress-bar";
+    statusEl.textContent = "Add at least 10 projects to submit.";
+    statusEl.className = "small text-muted mb-0 mt-1";
+    submitBtn.disabled = true;
+    return;
+  }
+
+  container.innerHTML = '';
+  shortlist.forEach((pid, idx) => {
+    const p = PROJECT_DATA[pid];
+    if (!p) return;
+    const over = idx >= 10;
+    const div  = document.createElement('div');
+    div.className = 'shortlist-item' + (over ? ' over10' : '');
+    div.dataset.id = pid;
+    div.innerHTML = `
+      <span class="rank-dot${over ? ' grey' : ''}">•</span>
+      <div class="item-label">
+        <div class="pid">${pid}</div>
+        <div class="meta">${p.title || ''}</div>
+      </div>
+      <button type="button" class="btn-remove" title="Remove">×</button>
+    `;
+    div.querySelector('.btn-remove').addEventListener('click', () => removeItem(pid));
+    container.appendChild(div);
+  });
+
+  const n = shortlist.length;
+  countBadge.textContent = n;
+  bar.style.width = Math.min(n / 10 * 100, 100) + "%";
+
+  if (n < 10) {
+    bar.className = "progress-bar bg-warning";
+    statusEl.innerHTML = `Add <strong>${10 - n} more</strong> to unlock submission.`;
+    statusEl.className = "small mb-0 mt-1 text-warning";
+    submitBtn.disabled = true;
+  } else {
+    bar.className = "progress-bar bg-success";
+    statusEl.innerHTML = n > 10
+      ? `First 10 selections will be submitted <span class="text-muted">(${n - 10} extra ignored)</span>`
+      : `Ready — your 10 projects are set.`;
+    statusEl.className = "small mb-0 mt-1 text-success fw-semibold";
+    submitBtn.disabled = false;
+  }
+}
+
+// ── Text formatter ────────────────────────────────────────────────────────────
+function formatText(raw) {
+  if (!raw) return '';
+  const text = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const blocks = text.split(/\n{2,}/);
+  return blocks.map(block => {
+    const lines = block.split('\n').map(l => l.trim()).filter(l => l);
+    if (!lines.length) return '';
+    const isBullet   = l => /^[-•*–]\s+/.test(l);
+    const isNumbered = l => /^\d+[.)]\s+/.test(l);
+    const isLettered = l => /^(\([a-zA-Z]\)|[a-zA-Z][.)])\s+/.test(l);
+    if (lines.some(isBullet) || lines.some(isNumbered) || lines.some(isLettered)) {
+      let html = '', listType = null;
+      const closeList = () => {
+        if (listType === 'ul') html += '</ul>';
+        if (listType === 'ol') html += '</ol>';
+        if (listType === 'al') html += '</ol>';
+        listType = null;
+      };
+      lines.forEach(l => {
+        if (isBullet(l)) {
+          if (listType !== 'ul') { closeList(); html += '<ul>'; listType = 'ul'; }
+          html += `<li>${l.replace(/^[-•*–]\s+/, '')}</li>`;
+        } else if (isNumbered(l)) {
+          if (listType !== 'ol') { closeList(); html += '<ol>'; listType = 'ol'; }
+          html += `<li>${l.replace(/^\d+[.)]\s+/, '')}</li>`;
+        } else if (isLettered(l)) {
+          if (listType !== 'al') { closeList(); html += '<ol type="a">'; listType = 'al'; }
+          html += `<li>${l.replace(/^(\([a-zA-Z]\)|[a-zA-Z][.)])\s+/, '')}</li>`;
+        } else {
+          closeList();
+          html += `<p>${l}</p>`;
+        }
+      });
+      closeList();
+      return html;
+    }
+    return `<p>${lines.join('<br>')}</p>`;
+  }).join('');
+}
+
+// ── Modal ─────────────────────────────────────────────────────────────────────
+function openModal(pid) {
+  const p = PROJECT_DATA[pid];
+  if (!p) return;
+  modalPid = pid;
+  document.getElementById('modal-pid').textContent = pid;
+  document.getElementById('modal-title').textContent = p.title;
+  const iBadge = s => `<span class="badge rounded-pill px-2" style="background:#dbeafe;color:#1d4ed8;font-size:11px;">${s}</span>`;
+  const tBadge = s => `<span class="badge rounded-pill px-2" style="background:#dcfce7;color:#166534;font-size:11px;">${s}</span>`;
+  document.getElementById('modal-industry-badges').innerHTML = [p.industry_type_1, p.industry_type_2].filter(v => v).map(iBadge).join(' ');
+  document.getElementById('modal-type-badges').innerHTML = [p.problem_category_1, p.problem_category_2, p.problem_category_3].filter(v => v).map(tBadge).join(' ');
+  document.getElementById('modal-description').innerHTML = formatText(p.problem_description);
+  document.getElementById('modal-outcomes').innerHTML    = formatText(p.expected_outcomes);
+  updateModalHeart();
+  bsModal.show();
+}
+
+document.getElementById('modal-heart-btn').addEventListener('click', () => {
+  if (modalPid) { toggleShortlist(modalPid); updateModalHeart(); }
+});
+
+document.querySelectorAll('.view-details').forEach(link => {
+  link.addEventListener('click', e => { e.preventDefault(); openModal(link.dataset.pid); });
+});
+
+// ── Clear shortlist ───────────────────────────────────────────────────────────
+document.getElementById('clear-btn').addEventListener('click', () => {
+  const n = shortlist.length;
+  if (confirm(`Clear all ${n} shortlisted project${n !== 1 ? 's' : ''}? This cannot be undone.`)) {
+    shortlist = []; saveShortlist(); renderShortlist(); syncHearts();
+  }
+});
+
+// ── Submit ────────────────────────────────────────────────────────────────────
+document.getElementById('submit-btn').addEventListener('click', function () {
+  if (shortlist.length < 10) return;
+  const top10 = shortlist.slice(0, 10);
+  for (let i = 1; i <= 10; i++) document.getElementById('pref_' + i).value = top10[i - 1];
+  this.disabled = true; this.textContent = 'Submitting…';
+  document.getElementById('pref-form').submit();
+});
+
+// ── Browse filter / search ────────────────────────────────────────────────────
+const cards     = Array.from(document.querySelectorAll('.project-card'));
+const searchEl  = document.getElementById('search');
+const indFilter = document.getElementById('filter-industry');
+const typeFilter= document.getElementById('filter-type');
+const countEl   = document.getElementById('result-count');
+const noResults = document.getElementById('no-results');
+
+function applyFilters() {
+  const q   = searchEl.value.toLowerCase().trim();
+  const ind = indFilter.value.toLowerCase();
+  const typ = typeFilter.value.toLowerCase();
+  let visible = 0;
+  cards.forEach(card => {
+    const industries = card.dataset.industries.toLowerCase().split('|');
+    const types      = card.dataset.types.toLowerCase().split('|');
+    const show = (!q || card.dataset.search.includes(q)) &&
+                 (!ind || industries.includes(ind)) &&
+                 (!typ || types.includes(typ));
+    card.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+  if (countEl) countEl.textContent = `Showing ${visible} of ${cards.length} projects`;
+  if (noResults) noResults.classList.toggle('d-none', visible > 0);
+}
+
+function resetFilters() { searchEl.value = ''; indFilter.value = ''; typeFilter.value = ''; applyFilters(); }
+searchEl.addEventListener('input', applyFilters);
+indFilter.addEventListener('change', applyFilters);
+typeFilter.addEventListener('change', applyFilters);
+document.getElementById('reset-btn').addEventListener('click', resetFilters);
+const resetLink = document.getElementById('reset-link');
+if (resetLink) resetLink.addEventListener('click', e => { e.preventDefault(); resetFilters(); });
+
+// ── Heart button listeners ────────────────────────────────────────────────────
+document.querySelectorAll('.heart-btn').forEach(btn => {
+  btn.addEventListener('click', () => toggleShortlist(btn.dataset.pid));
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+loadShortlist(); syncHearts(); renderShortlist(); applyFilters();
+</script>
+{% endblock %}

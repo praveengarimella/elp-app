@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime
 from sqlalchemy import Column, String, Integer, Text, DateTime, Boolean, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
@@ -9,8 +10,11 @@ class Project(Base):
 
     elp_project_id = Column(String, primary_key=True)
     title = Column(String, nullable=False)
-    industry_sector = Column(String, nullable=False)
-    problem_type = Column(String, nullable=False)
+    industry_type_1 = Column(String, nullable=False)
+    industry_type_2 = Column(String, nullable=True)
+    problem_category_1 = Column(String, nullable=False)
+    problem_category_2 = Column(String, nullable=True)
+    problem_category_3 = Column(String, nullable=True)
     problem_description = Column(Text, nullable=False)
     expected_outcomes = Column(Text, nullable=False)
 
@@ -20,6 +24,7 @@ class Group(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     group_id = Column(String, unique=True, nullable=False, index=True)
+    token = Column(String, unique=True, nullable=False, index=True, default=lambda: str(uuid.uuid4()))
     student_1_name = Column(String, nullable=False)
     student_1_roll = Column(String, nullable=False)
     student_1_email = Column(String, nullable=True)

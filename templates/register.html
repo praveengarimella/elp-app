@@ -18,8 +18,8 @@
     {{ error }}
     {% if already_exists %}
     <div class="mt-2">
-      <a href="/submit/{{ existing_group_id }}" class="btn btn-sm btn-outline-danger">
-        View submitted preferences for {{ existing_group_id }} →
+      <a href="/submit/{{ existing_token }}" class="btn btn-sm btn-outline-danger">
+        View submitted preferences →
       </a>
     </div>
     {% endif %}
@@ -43,6 +43,7 @@
             placeholder="e.g. 2024001"
             required
             autocomplete="off"
+            value="{{ form_data.group_id_suffix if form_data else '' }}"
           />
         </div>
         <div id="group-id-preview" class="mt-2 fw-semibold text-primary small"></div>
@@ -88,11 +89,13 @@
           </div>
           <div class="col-12 col-md-4">
             <label class="form-label small mb-1">Full Name <span class="text-danger">*</span></label>
-            <input type="text" class="form-control form-control-sm" name="s{{ i }}_name" placeholder="Full name" required />
+            <input type="text" class="form-control form-control-sm" name="s{{ i }}_name" placeholder="Full name" required
+                   value="{{ form_data['s' ~ i ~ '_name'] if form_data else '' }}" />
           </div>
           <div class="col-12 col-md-3">
             <label class="form-label small mb-1">Roll Number <span class="text-danger">*</span></label>
-            <input type="text" class="form-control form-control-sm" name="s{{ i }}_roll" placeholder="Roll number" required />
+            <input type="text" class="form-control form-control-sm" name="s{{ i }}_roll" placeholder="Roll number" required
+                   value="{{ form_data['s' ~ i ~ '_roll'] if form_data else '' }}" />
           </div>
           <div class="col-12 col-md-4">
             <label class="form-label small mb-1">Email Address <span class="text-danger">*</span></label>

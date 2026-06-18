@@ -4,6 +4,7 @@ import os
 import re
 import secrets
 import urllib.parse
+import uuid
 from datetime import datetime
 import httpx
 from starlette.middleware.sessions import SessionMiddleware
@@ -126,13 +127,16 @@ def browse_projects(request: Request, db: Session = Depends(get_db)):
     user_name = request.session.get("user_name")
     
     projects = sorted(db.query(Project).all(), key=natural_key)
-    industries = sorted({p.industry_sector for p in projects if p.industry_sector})
-    problem_types = sorted({p.problem_type for p in projects if p.problem_type})
+    industries = sorted({v for p in projects for v in [p.industry_type_1, p.industry_type_2] if v})
+    problem_types = sorted({v for p in projects for v in [p.problem_category_1, p.problem_category_2, p.problem_category_3] if v})
     projects_json = json.dumps({
         p.elp_project_id: {
             "title": p.title,
-            "problem_type": p.problem_type,
-            "industry_sector": p.industry_sector,
+            "industry_type_1": p.industry_type_1,
+            "industry_type_2": p.industry_type_2 or "",
+            "problem_category_1": p.problem_category_1,
+            "problem_category_2": p.problem_category_2 or "",
+            "problem_category_3": p.problem_category_3 or "",
             "problem_description": p.problem_description,
             "expected_outcomes": p.expected_outcomes,
         }
@@ -351,14 +355,22 @@ async def register_group(
     emails = [s1_email, s2_email, s3_email, s4_email, s5_email]
     rolls = [r.strip() for r in [s1_roll, s2_roll, s3_roll, s4_roll, s5_roll]]
 
-    def render_register(error=None, already_exists=False, existing_group_id=None):
+    def render_register(error=None, already_exists=False, existing_token=None):
         return templates.TemplateResponse("register.html", {
             "request": request,
             "error": error,
             "already_exists": already_exists,
-            "existing_group_id": existing_group_id,
+            "existing_token": existing_token,
             "user_email": user_email,
-            "user_name": request.session.get("user_name", "")
+            "user_name": request.session.get("user_name", ""),
+            "form_data": {
+                "group_id_suffix": group_id_suffix,
+                "s1_name": s1_name, "s1_roll": s1_roll,
+                "s2_name": s2_name, "s2_roll": s2_roll,
+                "s3_name": s3_name, "s3_roll": s3_roll,
+                "s4_name": s4_name, "s4_roll": s4_roll,
+                "s5_name": s5_name, "s5_roll": s5_roll,
+            },
         }, status_code=400)
 
     # 1. Enforce that all email domains are isb.edu (with dev bypass)
@@ -380,7 +392,7 @@ async def register_group(
             return render_register(
                 error=f"Group {group_id} has already submitted preferences. You can view your submission at the link below.",
                 already_exists=True,
-                existing_group_id=group_id
+                existing_token=existing.token
             )
         else:
             if user_email in [existing.student_1_email, existing.student_2_email, existing.student_3_email, existing.student_4_email, existing.student_5_email]:
@@ -417,6 +429,7 @@ async def register_group(
 
     group = Group(
         group_id=group_id,
+        token=str(uuid.uuid4()),
         student_1_name=s1_name.strip(), student_1_roll=rolls[0], student_1_email=s1_email,
         student_2_name=s2_name.strip(), student_2_roll=rolls[1], student_2_email=s2_email,
         student_3_name=s3_name.strip(), student_3_roll=rolls[2], student_3_email=s3_email,
@@ -426,16 +439,16 @@ async def register_group(
     )
     db.add(group)
     db.commit()
-    return RedirectResponse(url=f"/submit/{group_id}", status_code=303)
+    db.refresh(group)
+    return RedirectResponse(url=f"/submit/{group.token}", status_code=303)
 
 
-@app.get("/submit/{group_id}", response_class=HTMLResponse)
-def submit_page(group_id: str, request: Request, db: Session = Depends(get_db)):
+@app.get("/submit/{token}", response_class=HTMLResponse)
+def submit_page(token: str, request: Request, db: Session = Depends(get_db)):
     user_email = request.session.get("user_email")
     if not user_email:
         return RedirectResponse(url="/landing-login", status_code=303)
-        
-    group = db.query(Group).filter(Group.group_id == group_id).first()
+    group = db.query(Group).filter(Group.token == token).first()
     if not group:
         return templates.TemplateResponse("not_found.html", {"request": request}, status_code=404)
 
@@ -449,19 +462,23 @@ def submit_page(group_id: str, request: Request, db: Session = Depends(get_db)):
         return templates.TemplateResponse("submitted.html", {
             "request": request,
             "group": group,
+            "token": token,
             "prefs": prefs,
             "user_email": user_email,
             "user_name": request.session.get("user_name", "")
         })
 
     projects = sorted(db.query(Project).all(), key=natural_key)
-    industries = sorted({p.industry_sector for p in projects if p.industry_sector})
-    problem_types = sorted({p.problem_type for p in projects if p.problem_type})
+    industries = sorted({v for p in projects for v in [p.industry_type_1, p.industry_type_2] if v})
+    problem_types = sorted({v for p in projects for v in [p.problem_category_1, p.problem_category_2, p.problem_category_3] if v})
     projects_json = json.dumps({
         p.elp_project_id: {
             "title": p.title,
-            "problem_type": p.problem_type,
-            "industry_sector": p.industry_sector,
+            "industry_type_1": p.industry_type_1,
+            "industry_type_2": p.industry_type_2 or "",
+            "problem_category_1": p.problem_category_1,
+            "problem_category_2": p.problem_category_2 or "",
+            "problem_category_3": p.problem_category_3 or "",
             "problem_description": p.problem_description,
             "expected_outcomes": p.expected_outcomes,
         }
@@ -471,6 +488,7 @@ def submit_page(group_id: str, request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse("submit.html", {
         "request": request,
         "group": group,
+        "token": token,
         "projects": projects,
         "industries": industries,
         "problem_types": problem_types,
@@ -480,9 +498,9 @@ def submit_page(group_id: str, request: Request, db: Session = Depends(get_db)):
     })
 
 
-@app.post("/submit/{group_id}")
+@app.post("/submit/{token}")
 async def submit_preferences(
-    group_id: str,
+    token: str,
     request: Request,
     db: Session = Depends(get_db),
     pref_1: str = Form(...), pref_2: str = Form(...),
@@ -494,8 +512,7 @@ async def submit_preferences(
     user_email = request.session.get("user_email")
     if not user_email:
         return RedirectResponse(url="/landing-login", status_code=303)
-        
-    group = db.query(Group).filter(Group.group_id == group_id).first()
+    group = db.query(Group).filter(Group.token == token).first()
     if not group:
         return templates.TemplateResponse("not_found.html", {"request": request}, status_code=404)
         
@@ -505,41 +522,41 @@ async def submit_preferences(
         return HTMLResponse("<h1>403 Forbidden</h1><p>You do not have permission to modify this group's preferences.</p>", status_code=403)
 
     if group.is_submitted:
-        return RedirectResponse(url=f"/submit/{group_id}", status_code=303)
+        return RedirectResponse(url=f"/submit/{token}", status_code=303)
 
     prefs = [pref_1, pref_2, pref_3, pref_4, pref_5,
              pref_6, pref_7, pref_8, pref_9, pref_10]
 
     if len(set(prefs)) != 10:
-        projects = db.query(Project).order_by(Project.elp_project_id).all()
+        projects = sorted(db.query(Project).all(), key=natural_key)
         return templates.TemplateResponse("submit.html", {
             "request": request,
             "group": group,
+            "token": token,
             "projects": projects,
-            "industries": sorted({p.industry_sector for p in projects}),
-            "problem_types": sorted({p.problem_type for p in projects}),
-            "projects_json": json.dumps({p.elp_project_id: {"title": p.title, "problem_type": p.problem_type, "industry_sector": p.industry_sector, "problem_description": p.problem_description, "expected_outcomes": p.expected_outcomes} for p in projects}),
+            "industries": sorted({v for p in projects for v in [p.industry_type_1, p.industry_type_2] if v}),
+            "problem_types": sorted({v for p in projects for v in [p.problem_category_1, p.problem_category_2, p.problem_category_3] if v}),
+            "projects_json": json.dumps({p.elp_project_id: {"title": p.title, "industry_type_1": p.industry_type_1, "industry_type_2": p.industry_type_2 or "", "problem_category_1": p.problem_category_1, "problem_category_2": p.problem_category_2 or "", "problem_category_3": p.problem_category_3 or "", "problem_description": p.problem_description, "expected_outcomes": p.expected_outcomes} for p in projects}),
             "error": "Duplicate projects detected. Please ensure all 10 preferences are different.",
             "user_email": user_email,
             "user_name": request.session.get("user_name", "")
         }, status_code=400)
 
     for rank, pid in enumerate(prefs, start=1):
-        db.add(Preference(group_id=group_id, elp_project_id=pid, rank=rank))
+        db.add(Preference(group_id=group.group_id, elp_project_id=pid, rank=rank))
 
     group.is_submitted = True
     group.submitted_at = datetime.utcnow()
     db.commit()
-    return RedirectResponse(url=f"/submit/{group_id}", status_code=303)
+    return RedirectResponse(url=f"/submit/{token}", status_code=303)
 
 
-@app.get("/submit/{group_id}/download")
-def download_preferences(group_id: str, request: Request, db: Session = Depends(get_db)):
+@app.get("/submit/{token}/download")
+def download_preferences(token: str, request: Request, db: Session = Depends(get_db)):
     user_email = request.session.get("user_email")
     if not user_email:
         raise HTTPException(status_code=401, detail="Unauthorized")
-        
-    group = db.query(Group).filter(Group.group_id == group_id).first()
+    group = db.query(Group).filter(Group.token == token).first()
     if not group or not group.is_submitted:
         raise HTTPException(status_code=404)
 
@@ -573,8 +590,8 @@ def download_preferences(group_id: str, request: Request, db: Session = Depends(
             pref.rank,
             pref.elp_project_id,
             pref.project.title,
-            pref.project.problem_type,
-            pref.project.industry_sector,
+            pref.project.problem_category_1,
+            pref.project.industry_type_1,
         ])
 
     # Column widths
@@ -587,7 +604,7 @@ def download_preferences(group_id: str, request: Request, db: Session = Depends(
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
-    filename = f"ELP_preferences_{group_id}.xlsx"
+    filename = f"ELP_preferences_{group.group_id}.xlsx"
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -645,25 +662,36 @@ async def upload_projects(
 
     col = {}
     for i, h in enumerate(headers):
-        if "project_id" in h or (h.startswith("elp") and "id" in h):
+        if "project_id" in h or "project_code" in h or (h.startswith("elp") and "id" in h):
             col["elp_project_id"] = i
         elif h == "title" or "project_title" in h:
             col["title"] = i
+        elif "industry" in h and "2" in h:
+            col["industry_type_2"] = i
         elif "industry" in h:
-            col["industry_sector"] = i
-        elif "problem_type" in h or h == "type":
-            col["problem_type"] = i
+            col["industry_type_1"] = i
+        elif ("problem_type" in h or "category" in h) and "3" in h:
+            col["problem_category_3"] = i
+        elif ("problem_type" in h or "category" in h) and "2" in h:
+            col["problem_category_2"] = i
+        elif "problem_type" in h or "category" in h:
+            col["problem_category_1"] = i
         elif "description" in h:
             col["problem_description"] = i
         elif "outcome" in h:
             col["expected_outcomes"] = i
 
-    missing = [k for k in ("elp_project_id", "title", "industry_sector", "problem_type",
+    missing = [k for k in ("elp_project_id", "title", "industry_type_1", "problem_category_1",
                             "problem_description", "expected_outcomes") if k not in col]
     if missing:
         readable = [m.replace("_", " ").title() for m in missing]
         return dashboard(error=f"Could not find these columns: {', '.join(readable)}. "
                                f"Found: {', '.join(raw_headers)}")
+
+    def get_cell_str(row, key):
+        if key not in col:
+            return ""
+        return str(row[col[key]].value or "").strip()
 
     uploaded = updated = 0
     for row in ws.iter_rows(min_row=2, values_only=False):
@@ -672,8 +700,11 @@ async def upload_projects(
             continue
         data = dict(
             title=cell_to_html(row[col["title"]].value).strip(),
-            industry_sector=str(row[col["industry_sector"]].value or "").strip(),
-            problem_type=str(row[col["problem_type"]].value or "").strip(),
+            industry_type_1=get_cell_str(row, "industry_type_1"),
+            industry_type_2=get_cell_str(row, "industry_type_2"),
+            problem_category_1=get_cell_str(row, "problem_category_1"),
+            problem_category_2=get_cell_str(row, "problem_category_2"),
+            problem_category_3=get_cell_str(row, "problem_category_3"),
             problem_description=cell_to_html(row[col["problem_description"]].value),
             expected_outcomes=cell_to_html(row[col["expected_outcomes"]].value),
         )

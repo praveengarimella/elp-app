@@ -12,9 +12,20 @@
       Group <strong>{{ group.group_id }}</strong> — your top 10 project preferences have been recorded.<br />
       You will receive your final project assignment by email.
     </p>
-    <a href="/submit/{{ group.group_id }}/download" class="btn btn-success mt-1">
+    <a href="/submit/{{ token }}/download" class="btn btn-success mt-1">
       &#11015; Download My Preference List
     </a>
+  </div>
+
+  <div class="alert alert-info text-start mt-3">
+    <div class="fw-semibold mb-1">Your unique submission link</div>
+    <p class="small text-muted mb-2">
+      Share this link with your group. Anyone with it can view your submitted preferences at any time.
+    </p>
+    <div class="input-group input-group-sm">
+      <input type="text" class="form-control font-monospace" id="unique-link" readonly />
+      <button class="btn btn-outline-secondary" type="button" id="copy-btn">Copy</button>
+    </div>
   </div>
 
   {% if prefs %}
@@ -24,7 +35,7 @@
       {% for pref in prefs %}
       <li class="list-group-item d-flex align-items-center gap-3">
         <span class="badge rounded-pill fw-bold px-2 py-1"
-              style="background:{% if loop.index <= 3 %}#7c3aed{% else %}#0d6efd{% endif %};color:#fff;min-width:28px;text-align:center;">
+              style="background:#0d6efd;color:#fff;min-width:28px;text-align:center;">
           {{ loop.index }}
         </span>
         <div>
@@ -45,4 +56,17 @@
 
 </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const linkInput = document.getElementById('unique-link');
+  linkInput.value = window.location.origin + '/submit/{{ token }}';
+  document.getElementById('copy-btn').addEventListener('click', function () {
+    navigator.clipboard.writeText(linkInput.value).then(() => {
+      this.textContent = 'Copied!';
+      setTimeout(() => { this.textContent = 'Copy'; }, 2000);
+    });
+  });
+</script>
 {% endblock %}

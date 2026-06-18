@@ -74,15 +74,18 @@
   {% for project in projects %}
   <div class="card project-card mb-2"
        data-pid="{{ project.elp_project_id }}"
-       data-industry="{{ project.industry_sector }}"
-       data-type="{{ project.problem_type }}"
-       data-search="{{ (project.elp_project_id ~ ' ' ~ project.title ~ ' ' ~ project.industry_sector ~ ' ' ~ project.problem_type ~ ' ' ~ project.problem_description ~ ' ' ~ project.expected_outcomes)|lower }}">
+       data-industries="{{ project.industry_type_1 }}{% if project.industry_type_2 %}|{{ project.industry_type_2 }}{% endif %}"
+       data-types="{{ project.problem_category_1 }}{% if project.problem_category_2 %}|{{ project.problem_category_2 }}{% endif %}{% if project.problem_category_3 %}|{{ project.problem_category_3 }}{% endif %}"
+       data-search="{{ (project.elp_project_id ~ ' ' ~ project.title ~ ' ' ~ project.industry_type_1 ~ ' ' ~ (project.industry_type_2 or '') ~ ' ' ~ project.problem_category_1 ~ ' ' ~ (project.problem_category_2 or '') ~ ' ' ~ (project.problem_category_3 or '') ~ ' ' ~ project.problem_description ~ ' ' ~ project.expected_outcomes)|lower }}">
     <div class="card-body py-2 px-3">
       <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
         <span class="fw-bold small text-dark">{{ project.elp_project_id }}</span>
         <span class="small text-secondary">{{ project.title }}</span>
-        <span class="badge rounded-pill px-2" style="background:#dbeafe;color:#1d4ed8;font-size:10px;">{{ project.industry_sector }}</span>
-        <span class="badge rounded-pill px-2" style="background:#dcfce7;color:#166534;font-size:10px;">{{ project.problem_type }}</span>
+        <span class="badge rounded-pill px-2" style="background:#dbeafe;color:#1d4ed8;font-size:10px;">{{ project.industry_type_1 }}</span>
+        {% if project.industry_type_2 %}<span class="badge rounded-pill px-2" style="background:#dbeafe;color:#1d4ed8;font-size:10px;">{{ project.industry_type_2 }}</span>{% endif %}
+        <span class="badge rounded-pill px-2" style="background:#dcfce7;color:#166534;font-size:10px;">{{ project.problem_category_1 }}</span>
+        {% if project.problem_category_2 %}<span class="badge rounded-pill px-2" style="background:#dcfce7;color:#166534;font-size:10px;">{{ project.problem_category_2 }}</span>{% endif %}
+        {% if project.problem_category_3 %}<span class="badge rounded-pill px-2" style="background:#dcfce7;color:#166534;font-size:10px;">{{ project.problem_category_3 }}</span>{% endif %}
       </div>
       <p class="teaser-text small mb-1">{{ project.problem_description }}</p>
       <a href="#" class="small text-primary view-details" data-pid="{{ project.elp_project_id }}">View details →</a>
@@ -104,8 +107,8 @@
         <div class="flex-grow-1">
           <div class="d-flex flex-wrap align-items-center gap-2 mb-1">
             <span id="modal-pid" class="fw-bold text-dark"></span>
-            <span id="modal-industry" class="badge rounded-pill px-2" style="background:#dbeafe;color:#1d4ed8;font-size:11px;"></span>
-            <span id="modal-type"     class="badge rounded-pill px-2" style="background:#dcfce7;color:#166534;font-size:11px;"></span>
+            <span id="modal-industry-badges"></span>
+            <span id="modal-type-badges"></span>
           </div>
           <h5 class="modal-title mb-0" id="modal-title"></h5>
         </div>
@@ -179,10 +182,12 @@ document.querySelectorAll('.view-details').forEach(link => {
     const pid = link.dataset.pid;
     const p   = PROJECT_DATA[pid];
     if (!p) return;
-    document.getElementById('modal-pid').textContent      = pid;
-    document.getElementById('modal-title').textContent    = p.title;
-    document.getElementById('modal-industry').textContent = p.industry_sector;
-    document.getElementById('modal-type').textContent     = p.problem_type;
+    document.getElementById('modal-pid').textContent = pid;
+    document.getElementById('modal-title').textContent = p.title;
+    const iBadge = s => `<span class="badge rounded-pill px-2" style="background:#dbeafe;color:#1d4ed8;font-size:11px;">${s}</span>`;
+    const tBadge = s => `<span class="badge rounded-pill px-2" style="background:#dcfce7;color:#166534;font-size:11px;">${s}</span>`;
+    document.getElementById('modal-industry-badges').innerHTML = [p.industry_type_1, p.industry_type_2].filter(v => v).map(iBadge).join(' ');
+    document.getElementById('modal-type-badges').innerHTML = [p.problem_category_1, p.problem_category_2, p.problem_category_3].filter(v => v).map(tBadge).join(' ');
     document.getElementById('modal-description').innerHTML = formatText(p.problem_description);
     document.getElementById('modal-outcomes').innerHTML    = formatText(p.expected_outcomes);
     bsModal.show();
@@ -202,9 +207,11 @@ function applyFilters() {
   const typ = typeFilter.value.toLowerCase();
   let visible = 0;
   cards.forEach(card => {
+    const industries = card.dataset.industries.toLowerCase().split('|');
+    const types      = card.dataset.types.toLowerCase().split('|');
     const show = (!q || card.dataset.search.includes(q)) &&
-                 (!ind || card.dataset.industry.toLowerCase() === ind) &&
-                 (!typ || card.dataset.type.toLowerCase() === typ);
+                 (!ind || industries.includes(ind)) &&
+                 (!typ || types.includes(typ));
     card.style.display = show ? '' : 'none';
     if (show) visible++;
   });
