@@ -62,12 +62,13 @@ from sqlalchemy.orm import Session
 
 Base.metadata.create_all(bind=engine)
 
-# Database schema migration for groups table (adding email columns if missing)
+# Database schema migration for groups table (adding email and token columns if missing)
 db = Session(bind=engine)
 try:
     columns_info = db.execute(text("PRAGMA table_info(groups)")).fetchall()
     column_names = [col[1] for col in columns_info]
     
+    migrated = False
     if "student_1_email" not in column_names:
         print("Migrating database: Adding student email columns to 'groups' table...")
         db.execute(text("ALTER TABLE groups ADD COLUMN student_1_email VARCHAR"))
@@ -76,6 +77,29 @@ try:
         db.execute(text("ALTER TABLE groups ADD COLUMN student_4_email VARCHAR"))
         db.execute(text("ALTER TABLE groups ADD COLUMN student_5_email VARCHAR"))
         db.commit()
+        migrated = True
+        
+    if "token" not in column_names:
+        print("Migrating database: Adding token column to 'groups' table...")
+        db.execute(text("ALTER TABLE groups ADD COLUMN token VARCHAR"))
+        db.commit()
+        
+        # Populate token for existing rows
+        existing_groups = db.execute(text("SELECT id FROM groups WHERE token IS NULL")).fetchall()
+        for g in existing_groups:
+            db.execute(text("UPDATE groups SET token = :token WHERE id = :id"), {"token": str(uuid.uuid4()), "id": g[0]})
+        db.commit()
+        
+        # Create unique index on the new token column
+        try:
+            db.execute(text("CREATE UNIQUE INDEX ix_groups_token ON groups (token)"))
+            db.commit()
+        except Exception as idx_err:
+            print(f"Warning: Could not create unique index on token: {idx_err}")
+            
+        migrated = True
+        
+    if migrated:
         print("Database migration completed successfully!")
 except Exception as e:
     print(f"Error checking/running database migration: {e}")
