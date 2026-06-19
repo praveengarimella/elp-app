@@ -99,6 +99,40 @@ try:
             
         migrated = True
         
+    # Database schema migration for projects table
+    proj_columns_info = db.execute(text("PRAGMA table_info(projects)")).fetchall()
+    proj_column_names = [col[1] for col in proj_columns_info]
+    
+    if "industry_type_1" not in proj_column_names:
+        print("Migrating database: Adding new columns to 'projects' table...")
+        db.execute(text("ALTER TABLE projects ADD COLUMN industry_type_1 VARCHAR"))
+        db.execute(text("ALTER TABLE projects ADD COLUMN industry_type_2 VARCHAR"))
+        db.execute(text("ALTER TABLE projects ADD COLUMN problem_category_1 VARCHAR"))
+        db.execute(text("ALTER TABLE projects ADD COLUMN problem_category_2 VARCHAR"))
+        db.execute(text("ALTER TABLE projects ADD COLUMN problem_category_3 VARCHAR"))
+        db.commit()
+        
+        # Copy data from old columns if they exist
+        if "industry_sector" in proj_column_names:
+            db.execute(text("UPDATE projects SET industry_type_1 = industry_sector"))
+        if "problem_type" in proj_column_names:
+            db.execute(text("UPDATE projects SET problem_category_1 = problem_type"))
+        db.commit()
+        
+        # Drop old columns
+        if "industry_sector" in proj_column_names:
+            try:
+                db.execute(text("ALTER TABLE projects DROP COLUMN industry_sector"))
+            except Exception as drop_err:
+                print(f"Warning: Could not drop column industry_sector: {drop_err}")
+        if "problem_type" in proj_column_names:
+            try:
+                db.execute(text("ALTER TABLE projects DROP COLUMN problem_type"))
+            except Exception as drop_err:
+                print(f"Warning: Could not drop column problem_type: {drop_err}")
+        db.commit()
+        migrated = True
+        
     if migrated:
         print("Database migration completed successfully!")
 except Exception as e:
