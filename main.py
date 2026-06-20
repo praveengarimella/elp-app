@@ -177,55 +177,32 @@ def require_admin(credentials: HTTPBasicCredentials = Depends(security)):
 # Student routes
 # ---------------------------------------------------------------------------
 
+def get_user_group(db: Session, user_email: str):
+    if not user_email:
+        return None
+    return db.query(Group).filter(
+        or_(
+            Group.student_1_email == user_email,
+            Group.student_2_email == user_email,
+            Group.student_3_email == user_email,
+            Group.student_4_email == user_email,
+            Group.student_5_email == user_email,
+        )
+    ).first()
+
+
 @app.get("/", response_class=HTMLResponse)
-def browse_projects(request: Request, db: Session = Depends(get_db)):
+def home(request: Request, db: Session = Depends(get_db)):
     user_email = request.session.get("user_email")
     if not user_email:
         return RedirectResponse(url="/landing-login", status_code=303)
-    user_name = request.session.get("user_name")
-    
-    projects = sorted(db.query(Project).all(), key=natural_key)
-    industries = sorted({v for p in projects for v in [p.industry_type_1, p.industry_type_2] if v})
-    problem_types = sorted({v for p in projects for v in [p.problem_category_1, p.problem_category_2, p.problem_category_3] if v})
-    projects_json = json.dumps({
-        p.elp_project_id: {
-            "title": p.title,
-            "industry_type_1": p.industry_type_1,
-            "industry_type_2": p.industry_type_2 or "",
-            "problem_category_1": p.problem_category_1,
-            "problem_category_2": p.problem_category_2 or "",
-            "problem_category_3": p.problem_category_3 or "",
-            "problem_description": p.problem_description,
-            "expected_outcomes": p.expected_outcomes,
-        }
-        for p in projects
-    })
-    
-    # Check if the user is already part of a registered group
-    user_group_id = None
-    if user_email:
-        group = db.query(Group).filter(
-            or_(
-                Group.student_1_email == user_email,
-                Group.student_2_email == user_email,
-                Group.student_3_email == user_email,
-                Group.student_4_email == user_email,
-                Group.student_5_email == user_email,
-            )
-        ).first()
-        if group:
-            user_group_id = group.group_id
-            
-    return templates.TemplateResponse("projects.html", {
-        "request": request,
-        "projects": projects,
-        "industries": industries,
-        "problem_types": problem_types,
-        "projects_json": projects_json,
-        "user_email": user_email,
-        "user_name": user_name,
-        "user_group_id": user_group_id
-    })
+
+    # Registration is the gate — projects are only browsable after registering,
+    # inside the submit page's split-pane view.
+    group = get_user_group(db, user_email)
+    if group:
+        return RedirectResponse(url=f"/submit/{group.token}", status_code=303)
+    return RedirectResponse(url="/register", status_code=303)
 
 
 @app.get("/landing-login", response_class=HTMLResponse)
@@ -233,7 +210,10 @@ def landing_login(request: Request):
     user_email = request.session.get("user_email")
     if user_email:
         return RedirectResponse(url="/", status_code=303)
-    return templates.TemplateResponse("login.html", {"request": request})
+    return templates.TemplateResponse("login.html", {
+        "request": request,
+        "dev_mode": not bool(MICROSOFT_CLIENT_ID),
+    })
 
 
 @app.get("/login")
@@ -349,7 +329,7 @@ async def auth_callback(request: Request, code: str = None, state: str = None, e
     ).first()
     
     if group:
-        return RedirectResponse(url=f"/submit/{group.group_id}", status_code=303)
+        return RedirectResponse(url=f"/submit/{group.token}", status_code=303)
     else:
         return RedirectResponse(url="/register", status_code=303)
 
@@ -358,6 +338,29 @@ async def auth_callback(request: Request, code: str = None, state: str = None, e
 @app.get("/logout")
 def logout(request: Request):
     request.session.clear()
+    return RedirectResponse(url="/", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Local-only dev login — bypasses Microsoft OAuth.
+# Disabled whenever MICROSOFT_CLIENT_ID is set, so it never activates in
+# production / any environment configured with real Azure AD credentials.
+# ---------------------------------------------------------------------------
+
+@app.get("/dev-login", response_class=HTMLResponse)
+def dev_login_form(request: Request):
+    if MICROSOFT_CLIENT_ID:
+        raise HTTPException(status_code=404)
+    return templates.TemplateResponse("dev_login.html", {"request": request})
+
+
+@app.post("/dev-login")
+def dev_login_submit(request: Request, email: str = Form(...), name: str = Form(...)):
+    if MICROSOFT_CLIENT_ID:
+        raise HTTPException(status_code=404)
+    request.session["user_email"] = email.strip().lower()
+    request.session["user_name"] = name.strip()
+    request.session["user_picture"] = ""
     return RedirectResponse(url="/", status_code=303)
 
 
@@ -378,8 +381,8 @@ def register_form(request: Request, db: Session = Depends(get_db)):
         )
     ).first()
     if group:
-        return RedirectResponse(url=f"/submit/{group.group_id}", status_code=303)
-        
+        return RedirectResponse(url=f"/submit/{group.token}", status_code=303)
+
     return templates.TemplateResponse("register.html", {
         "request": request,
         "user_email": user_email,
@@ -424,10 +427,10 @@ async def register_group(
             "form_data": {
                 "group_id_suffix": group_id_suffix,
                 "s1_name": s1_name, "s1_roll": s1_roll,
-                "s2_name": s2_name, "s2_roll": s2_roll,
-                "s3_name": s3_name, "s3_roll": s3_roll,
-                "s4_name": s4_name, "s4_roll": s4_roll,
-                "s5_name": s5_name, "s5_roll": s5_roll,
+                "s2_name": s2_name, "s2_roll": s2_roll, "s2_email": s2_email,
+                "s3_name": s3_name, "s3_roll": s3_roll, "s3_email": s3_email,
+                "s4_name": s4_name, "s4_roll": s4_roll, "s4_email": s4_email,
+                "s5_name": s5_name, "s5_roll": s5_roll, "s5_email": s5_email,
             },
         }, status_code=400)
 
@@ -443,6 +446,10 @@ async def register_group(
     if len(set(emails)) != 5:
         return render_register(error="Duplicate student emails detected. Each group member must have a unique email.")
 
+    # 2b. Check for duplicate roll numbers within the form
+    if len(set(rolls)) != 5:
+        return render_register(error="Each student must have a unique roll number. Please check your entries.")
+
     # 3. Same group ID already registered
     existing = db.query(Group).filter(Group.group_id == group_id).first()
     if existing:
@@ -454,7 +461,7 @@ async def register_group(
             )
         else:
             if user_email in [existing.student_1_email, existing.student_2_email, existing.student_3_email, existing.student_4_email, existing.student_5_email]:
-                return RedirectResponse(url=f"/submit/{group_id}", status_code=303)
+                return RedirectResponse(url=f"/submit/{existing.token}", status_code=303)
             else:
                 return render_register(error=f"Group {group_id} is already registered by another representative.")
 
@@ -523,7 +530,9 @@ def submit_page(token: str, request: Request, db: Session = Depends(get_db)):
             "token": token,
             "prefs": prefs,
             "user_email": user_email,
-            "user_name": request.session.get("user_name", "")
+            "user_name": request.session.get("user_name", ""),
+            "user_token": token,
+            "user_group_id": group.group_id,
         })
 
     projects = sorted(db.query(Project).all(), key=natural_key)
@@ -552,7 +561,9 @@ def submit_page(token: str, request: Request, db: Session = Depends(get_db)):
         "problem_types": problem_types,
         "projects_json": projects_json,
         "user_email": user_email,
-        "user_name": request.session.get("user_name", "")
+        "user_name": request.session.get("user_name", ""),
+        "user_token": token,
+        "user_group_id": group.group_id,
     })
 
 
@@ -597,7 +608,9 @@ async def submit_preferences(
             "projects_json": json.dumps({p.elp_project_id: {"title": p.title, "industry_type_1": p.industry_type_1, "industry_type_2": p.industry_type_2 or "", "problem_category_1": p.problem_category_1, "problem_category_2": p.problem_category_2 or "", "problem_category_3": p.problem_category_3 or "", "problem_description": p.problem_description, "expected_outcomes": p.expected_outcomes} for p in projects}),
             "error": "Duplicate projects detected. Please ensure all 10 preferences are different.",
             "user_email": user_email,
-            "user_name": request.session.get("user_name", "")
+            "user_name": request.session.get("user_name", ""),
+            "user_token": token,
+            "user_group_id": group.group_id,
         }, status_code=400)
 
     for rank, pid in enumerate(prefs, start=1):
@@ -642,7 +655,7 @@ def download_preferences(token: str, request: Request, db: Session = Depends(get
         ws.append([i, name, roll, email])
 
     ws.append([])
-    ws.append(["Rank", "Project ID", "Title", "Problem Type", "Industry Sector"])
+    ws.append(["Serial Number", "Project ID", "Title", "Problem Type", "Industry Sector"])
     for pref in sorted(group.preferences, key=lambda x: x.rank):
         ws.append([
             pref.rank,

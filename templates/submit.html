@@ -157,7 +157,7 @@
           {% for ind in industries %}<option value="{{ ind }}">{{ ind }}</option>{% endfor %}
         </select>
         <select id="filter-type" class="form-select form-select-sm">
-          <option value="">All Types</option>
+          <option value="">All Problem Types</option>
           {% for pt in problem_types %}<option value="{{ pt }}">{{ pt }}</option>{% endfor %}
         </select>
         <button class="btn btn-sm btn-outline-secondary px-2 flex-shrink-0"
@@ -262,8 +262,8 @@
 
 {% block scripts %}
 <script>
-const GROUP_ID     = "{{ group.group_id }}";
-const LS_KEY       = "elp_shortlist_" + GROUP_ID;
+const GROUP_TOKEN  = "{{ token }}";
+const LS_KEY       = "elp_shortlist_" + GROUP_TOKEN;
 const PROJECT_DATA = {{ projects_json | safe }};
 
 let shortlist = [];

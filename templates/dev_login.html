@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Dev Login{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+<div class="col-md-5">
+  <div class="alert alert-warning small mb-4">
+    <strong>Local dev only.</strong> This page bypasses Microsoft sign-in and is automatically
+    disabled wherever <code>MICROSOFT_CLIENT_ID</code> is set (e.g. production).
+  </div>
+  <div class="card">
+    <div class="card-header fw-semibold bg-white">Sign in (dev bypass)</div>
+    <div class="card-body">
+      <form method="POST" action="/dev-login">
+        <div class="mb-3">
+          <label class="form-label small">Name</label>
+          <input type="text" class="form-control" name="name" placeholder="Test Student" required />
+        </div>
+        <div class="mb-3">
+          <label class="form-label small">Email</label>
+          <input type="email" class="form-control" name="email" placeholder="test1@isb.edu" required />
+          <div class="form-text">Must end in @isb.edu, or contain "vishal" / "praveengarimella" for the dev bypass elsewhere in the app.</div>
+        </div>
+        <button type="submit" class="btn btn-primary w-100">Continue</button>
+      </form>
+    </div>
+  </div>
+</div>
+</div>
+{% endblock %}

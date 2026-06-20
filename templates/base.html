@@ -32,22 +32,15 @@
       <span class="navbar-toggler-icon"></span>
     </button>
     <div class="collapse navbar-collapse" id="navbarNav">
-      <div class="navbar-nav gap-2">
-        <a class="nav-link" href="/">Browse Projects</a>
-      </div>
       <div class="navbar-nav ms-auto gap-3 align-items-center">
         {% if user_email %}
           <div class="d-flex align-items-center gap-2 text-white-50">
             <span class="small">Logged in as <strong>{{ user_name }}</strong> ({{ user_email }})</span>
           </div>
-          {% if user_group_id %}
-            <a class="btn btn-outline-info btn-sm text-white px-3" href="/submit/{{ user_group_id }}">My Group ({{ user_group_id }})</a>
-          {% else %}
-            <a class="btn btn-primary btn-sm text-white px-3" href="/register">Register Group</a>
+          {% if user_token %}
+            <a class="btn btn-outline-info btn-sm text-white px-3" href="/submit/{{ user_token }}">My Group ({{ user_group_id }})</a>
           {% endif %}
           <a class="btn btn-outline-danger btn-sm px-2" href="/logout" style="font-size: 11px;">Logout</a>
-        {% else %}
-          <a class="nav-link btn btn-primary text-white px-3" href="/register">Submit Preferences</a>
         {% endif %}
       </div>
     </div>

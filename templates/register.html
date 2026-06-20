@@ -73,7 +73,8 @@
           </div>
           <div class="col-12 col-md-3">
             <label class="form-label small mb-1">Roll Number <span class="text-danger">*</span></label>
-            <input type="text" class="form-control form-control-sm" name="s1_roll" id="s1_roll" placeholder="Your roll number" required autocomplete="off" />
+            <input type="text" class="form-control form-control-sm" name="s1_roll" id="s1_roll" placeholder="Your roll number" required autocomplete="off"
+                   value="{{ form_data.s1_roll if form_data else '' }}" />
           </div>
           <div class="col-12 col-md-4">
             <label class="form-label small mb-1">Email Address <span class="text-danger">*</span></label>
@@ -99,7 +100,8 @@
           </div>
           <div class="col-12 col-md-4">
             <label class="form-label small mb-1">Email Address <span class="text-danger">*</span></label>
-            <input type="email" class="form-control form-control-sm" name="s{{ i }}_email" placeholder="e.g. name@isb.edu" required />
+            <input type="email" class="form-control form-control-sm" name="s{{ i }}_email" placeholder="e.g. name@isb.edu" required
+                   value="{{ form_data['s' ~ i ~ '_email'] if form_data else '' }}" />
           </div>
         </div>
         {% endfor %}
