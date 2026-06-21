@@ -479,6 +479,33 @@ async def register_group(
         if not is_allowed:
             return render_register(error=f"All group member emails must belong to the @isb.edu domain. Checked: {email}")
 
+    # 1b. Validate against Student Roster if the roster is populated
+    try:
+        roster_count = db.query(StudentRoster).count()
+    except Exception:
+        roster_count = 0
+
+    if roster_count > 0:
+        # Validate Student 1 (Representative)
+        s1_db = db.query(StudentRoster).filter(StudentRoster.email == s1_email).first()
+        if not s1_db:
+            return render_register(error=f"Your email '{s1_email}' is not found in the official student roster. Please contact the administrator.")
+        if s1_db.roll_number != s1_roll.strip():
+            return render_register(error=f"Your roll number '{s1_roll}' does not match the record for '{s1_email}' in the roster.")
+        
+        # Validate Students 2-5
+        for i, (name, roll, email) in enumerate([
+            (s2_name, s2_roll, s2_email),
+            (s3_name, s3_roll, s3_email),
+            (s4_name, s4_roll, s4_email),
+            (s5_name, s5_roll, s5_email),
+        ], start=2):
+            s_db = db.query(StudentRoster).filter(StudentRoster.email == email).first()
+            if not s_db:
+                return render_register(error=f"Student {i}'s email '{email}' is not found in the official student roster.")
+            if s_db.roll_number != roll.strip():
+                return render_register(error=f"Student {i}'s roll number '{roll}' does not match the record for '{email}' in the roster.")
+
     # 2. Check for duplicate emails within the form
     if len(set(emails)) != 5:
         return render_register(error="Duplicate student emails detected. Each group member must have a unique email.")
@@ -712,6 +739,7 @@ def admin_dashboard(
         "project_count": db.query(Project).count(),
         "group_count": db.query(Group).count(),
         "submitted_count": db.query(Group).filter(Group.is_submitted == True).count(),
+        "student_roster_count": db.query(StudentRoster).count(),
         "recent_groups": db.query(Group).order_by(Group.submitted_at.desc()).limit(10).all(),
     })
 
@@ -729,6 +757,7 @@ async def upload_projects(
             "project_count": db.query(Project).count(),
             "group_count": db.query(Group).count(),
             "submitted_count": db.query(Group).filter(Group.is_submitted == True).count(),
+            "student_roster_count": db.query(StudentRoster).count(),
             "recent_groups": db.query(Group).order_by(Group.submitted_at.desc()).limit(10).all(),
             "error": error,
             "success": success,
@@ -856,6 +885,68 @@ def export_preferences(db: Session = Depends(get_db), _=Depends(require_admin)):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=elp_preferences.xlsx"},
     )
+
+
+@app.post("/admin/upload-roster", response_class=HTMLResponse)
+async def upload_roster(
+    request: Request,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _=Depends(require_admin),
+):
+    def dashboard(error=None, success=None):
+        return templates.TemplateResponse("admin/dashboard.html", {
+            "request": request,
+            "project_count": db.query(Project).count(),
+            "group_count": db.query(Group).count(),
+            "submitted_count": db.query(Group).filter(Group.is_submitted == True).count(),
+            "student_roster_count": db.query(StudentRoster).count(),
+            "recent_groups": db.query(Group).order_by(Group.submitted_at.desc()).limit(10).all(),
+            "error": error,
+            "success": success,
+        })
+
+    contents = await file.read()
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(contents))
+    except Exception:
+        return dashboard(error="Could not read the file. Please upload a valid .xlsx file.")
+
+    ws = wb.active
+    raw_headers = [str(c.value).strip() if c.value else "" for c in ws[1]]
+    headers = [h.lower().replace(" ", "_") for h in raw_headers]
+
+    col = {}
+    for i, h in enumerate(headers):
+        if "roll" in h or "id" in h:
+            col["roll_number"] = i
+        elif "name" in h:
+            col["name"] = i
+        elif "email" in h or "mail" in h:
+            col["email"] = i
+
+    missing = [k for k in ("roll_number", "name", "email") if k not in col]
+    if missing:
+        readable = [m.replace("_", " ").title() for m in missing]
+        return dashboard(error=f"Could not find these columns: {', '.join(readable)}. Found: {', '.join(raw_headers)}")
+
+    uploaded = 0
+    # Clear the existing roster
+    db.query(StudentRoster).delete()
+    db.commit()
+
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        roll = str(row[col["roll_number"]] or "").strip()
+        name = str(row[col["name"]] or "").strip()
+        email = str(row[col["email"]] or "").strip().lower()
+        if not roll or not name or not email:
+            continue
+        
+        db.add(StudentRoster(roll_number=roll, name=name, email=email))
+        uploaded += 1
+
+    db.commit()
+    return dashboard(success=f"Done — Roster updated with {uploaded} students.")
 
 
 if __name__ == "__main__":
