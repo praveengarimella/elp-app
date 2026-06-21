@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Submit Preferences — {{ group.group_id }}{% endblock %}
+{% block title %}{% if group %}Submit Preferences — {{ group.group_id }}{% else %}Browse Projects{% endif %}{% endblock %}
 
 {% block head %}
 <style>
@@ -197,6 +197,7 @@
 
     <!-- Group banner -->
     <div class="group-banner d-flex align-items-center justify-content-between">
+      {% if group %}
       <div>
         <span class="fw-semibold text-dark">{{ group.group_id }}</span>
         <span class="text-muted small ms-2">
@@ -205,6 +206,13 @@
         </span>
       </div>
       <span class="text-muted small">Choose 10 Projects</span>
+      {% else %}
+      <div>
+        <span class="fw-semibold text-dark">Browse Projects</span>
+        <span class="text-muted small ms-2">You haven't registered a team yet</span>
+      </div>
+      <a href="/register" class="btn btn-primary btn-sm">Register My Team</a>
+      {% endif %}
     </div>
 
     <!-- Detail view -->
@@ -241,6 +249,7 @@
         <div class="sel-chips" id="sel-chips">
           <span class="text-muted" style="font-size:11px;">No projects selected yet — click ♡ to add.</span>
         </div>
+        {% if token %}
         <form method="POST" action="/submit/{{ token }}" id="pref-form" class="flex-shrink-0 ms-auto">
           {% for i in range(1, 11) %}
           <input type="hidden" name="pref_{{ i }}" id="pref_{{ i }}" value="" />
@@ -249,10 +258,21 @@
             Submit My 10 Projects
           </button>
         </form>
+        {% else %}
+        <a href="/register" id="submit-btn" class="btn btn-primary btn-sm flex-shrink-0 ms-auto">
+          Register My Team
+        </a>
+        {% endif %}
       </div>
+      {% if token %}
       <p class="text-muted mt-1 mb-0" style="font-size:10px;">
         You can add more than 10 — only your <strong>first 10 selections</strong> will be submitted.
       </p>
+      {% else %}
+      <p class="text-muted mt-1 mb-0" style="font-size:10px;">
+        Your selections are saved in this browser — <strong>register your team</strong> any time to submit them.
+      </p>
+      {% endif %}
     </div>
 
   </div>
@@ -262,8 +282,10 @@
 
 {% block scripts %}
 <script>
-const GROUP_TOKEN  = "{{ token }}";
-const LS_KEY       = "elp_shortlist_" + GROUP_TOKEN;
+const USER_EMAIL   = {% if user_email %}"{{ user_email }}"{% else %}""{% endif %};
+const GROUP_TOKEN  = {% if token %}"{{ token }}"{% else %}null{% endif %};
+const PRE_LS_KEY   = "elp_shortlist_pre_" + USER_EMAIL;
+const LS_KEY       = GROUP_TOKEN ? ("elp_shortlist_" + GROUP_TOKEN) : PRE_LS_KEY;
 const PROJECT_DATA = {{ projects_json | safe }};
 
 let shortlist = [];
@@ -274,6 +296,21 @@ function loadShortlist() {
   try { shortlist = JSON.parse(localStorage.getItem(LS_KEY) || "[]"); } catch { shortlist = []; }
 }
 function saveShortlist() { localStorage.setItem(LS_KEY, JSON.stringify(shortlist)); }
+
+// Carry over a shortlist built while browsing before registering — once a
+// token exists, fold any pre-registration picks into the real shortlist.
+function migratePreRegistrationShortlist() {
+  if (!GROUP_TOKEN) return;
+  let preList = [];
+  try { preList = JSON.parse(localStorage.getItem(PRE_LS_KEY) || "[]"); } catch { preList = []; }
+  if (preList.length) {
+    const merged = shortlist.slice();
+    preList.forEach(pid => { if (!merged.includes(pid)) merged.push(pid); });
+    shortlist = merged;
+    saveShortlist();
+  }
+  localStorage.removeItem(PRE_LS_KEY);
+}
 
 // ── Toggle / remove ───────────────────────────────────
 function toggleShortlist(pid) {
@@ -380,14 +417,18 @@ function renderSelections() {
 }
 
 // ── Submit ─────────────────────────────────────────────
-document.getElementById('submit-btn').addEventListener('click', function () {
-  if (shortlist.length < 10) return;
-  shortlist.slice(0, 10).forEach((pid, i) => {
-    document.getElementById('pref_' + (i + 1)).value = pid;
+// Only wired up when registered (token present) — otherwise #submit-btn is
+// a plain link to /register and needs no JS handling.
+if (GROUP_TOKEN) {
+  document.getElementById('submit-btn').addEventListener('click', function () {
+    if (shortlist.length < 10) return;
+    shortlist.slice(0, 10).forEach((pid, i) => {
+      document.getElementById('pref_' + (i + 1)).value = pid;
+    });
+    this.disabled = true; this.textContent = 'Submitting…';
+    document.getElementById('pref-form').submit();
   });
-  this.disabled = true; this.textContent = 'Submitting…';
-  document.getElementById('pref-form').submit();
-});
+}
 
 // ── Text formatter ─────────────────────────────────────
 function formatText(raw) {
@@ -468,7 +509,7 @@ typeFilter.addEventListener('change', applyFilters);
 document.getElementById('reset-btn').addEventListener('click', resetFilters);
 
 // ── Init ───────────────────────────────────────────────
-loadShortlist(); syncHearts(); renderSelections(); applyFilters();
+loadShortlist(); migratePreRegistrationShortlist(); syncHearts(); renderSelections(); applyFilters();
 if (rows.length > 0) openDetail(rows[0].dataset.id);
 </script>
 {% endblock %}

@@ -39,6 +39,8 @@
           </div>
           {% if user_token %}
             <a class="btn btn-outline-info btn-sm text-white px-3" href="/submit/{{ user_token }}">My Group ({{ user_group_id }})</a>
+          {% else %}
+            <a class="btn btn-primary btn-sm text-white px-3" href="/register">Register My Team</a>
           {% endif %}
           <a class="btn btn-outline-danger btn-sm px-2" href="/logout" style="font-size: 11px;">Logout</a>
         {% endif %}

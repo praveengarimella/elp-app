@@ -191,18 +191,55 @@ def get_user_group(db: Session, user_email: str):
     ).first()
 
 
+def get_projects_context(db: Session):
+    projects = sorted(db.query(Project).all(), key=natural_key)
+    industries = sorted({v for p in projects for v in [p.industry_type_1, p.industry_type_2] if v})
+    problem_types = sorted({v for p in projects for v in [p.problem_category_1, p.problem_category_2, p.problem_category_3] if v})
+    projects_json = json.dumps({
+        p.elp_project_id: {
+            "title": p.title,
+            "industry_type_1": p.industry_type_1,
+            "industry_type_2": p.industry_type_2 or "",
+            "problem_category_1": p.problem_category_1,
+            "problem_category_2": p.problem_category_2 or "",
+            "problem_category_3": p.problem_category_3 or "",
+            "problem_description": p.problem_description,
+            "expected_outcomes": p.expected_outcomes,
+        }
+        for p in projects
+    })
+    return {
+        "projects": projects,
+        "industries": industries,
+        "problem_types": problem_types,
+        "projects_json": projects_json,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request, db: Session = Depends(get_db)):
     user_email = request.session.get("user_email")
     if not user_email:
         return RedirectResponse(url="/landing-login", status_code=303)
 
-    # Registration is the gate — projects are only browsable after registering,
-    # inside the submit page's split-pane view.
+    # Already registered (submitted or not) — go straight to their workspace.
     group = get_user_group(db, user_email)
     if group:
         return RedirectResponse(url=f"/submit/{group.token}", status_code=303)
-    return RedirectResponse(url="/register", status_code=303)
+
+    # Not registered yet — let them browse and shortlist projects freely.
+    # Registering is a separate, optional step; their shortlist carries over
+    # automatically once they do (see submit.html's localStorage migration).
+    return templates.TemplateResponse("submit.html", {
+        "request": request,
+        "group": None,
+        "token": None,
+        **get_projects_context(db),
+        "user_email": user_email,
+        "user_name": request.session.get("user_name", ""),
+        "user_token": None,
+        "user_group_id": None,
+    })
 
 
 @app.get("/landing-login", response_class=HTMLResponse)
@@ -535,31 +572,11 @@ def submit_page(token: str, request: Request, db: Session = Depends(get_db)):
             "user_group_id": group.group_id,
         })
 
-    projects = sorted(db.query(Project).all(), key=natural_key)
-    industries = sorted({v for p in projects for v in [p.industry_type_1, p.industry_type_2] if v})
-    problem_types = sorted({v for p in projects for v in [p.problem_category_1, p.problem_category_2, p.problem_category_3] if v})
-    projects_json = json.dumps({
-        p.elp_project_id: {
-            "title": p.title,
-            "industry_type_1": p.industry_type_1,
-            "industry_type_2": p.industry_type_2 or "",
-            "problem_category_1": p.problem_category_1,
-            "problem_category_2": p.problem_category_2 or "",
-            "problem_category_3": p.problem_category_3 or "",
-            "problem_description": p.problem_description,
-            "expected_outcomes": p.expected_outcomes,
-        }
-        for p in projects
-    })
-
     return templates.TemplateResponse("submit.html", {
         "request": request,
         "group": group,
         "token": token,
-        "projects": projects,
-        "industries": industries,
-        "problem_types": problem_types,
-        "projects_json": projects_json,
+        **get_projects_context(db),
         "user_email": user_email,
         "user_name": request.session.get("user_name", ""),
         "user_token": token,
@@ -597,15 +614,11 @@ async def submit_preferences(
              pref_6, pref_7, pref_8, pref_9, pref_10]
 
     if len(set(prefs)) != 10:
-        projects = sorted(db.query(Project).all(), key=natural_key)
         return templates.TemplateResponse("submit.html", {
             "request": request,
             "group": group,
             "token": token,
-            "projects": projects,
-            "industries": sorted({v for p in projects for v in [p.industry_type_1, p.industry_type_2] if v}),
-            "problem_types": sorted({v for p in projects for v in [p.problem_category_1, p.problem_category_2, p.problem_category_3] if v}),
-            "projects_json": json.dumps({p.elp_project_id: {"title": p.title, "industry_type_1": p.industry_type_1, "industry_type_2": p.industry_type_2 or "", "problem_category_1": p.problem_category_1, "problem_category_2": p.problem_category_2 or "", "problem_category_3": p.problem_category_3 or "", "problem_description": p.problem_description, "expected_outcomes": p.expected_outcomes} for p in projects}),
+            **get_projects_context(db),
             "error": "Duplicate projects detected. Please ensure all 10 preferences are different.",
             "user_email": user_email,
             "user_name": request.session.get("user_name", ""),
