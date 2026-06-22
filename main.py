@@ -339,8 +339,8 @@ async def auth_callback(request: Request, code: str = None, state: str = None, e
             is_allowed = True
             break
             
-    # Dev bypasses for testing
-    if email.endswith("@pg.fju.us") or "praveengarimella" in email or "vishal" in email:
+    # Dev bypasses for testing (only active if MICROSOFT_CLIENT_ID is not configured)
+    if not MICROSOFT_CLIENT_ID and "vishal" in email:
         is_allowed = True
         
     if not is_allowed:
@@ -474,7 +474,9 @@ async def register_group(
     # 1. Enforce that all email domains are isb.edu (with dev bypass)
     for email in emails:
         is_allowed = False
-        if email.endswith("@isb.edu") or email.endswith(".isb.edu") or email.endswith("@pg.fju.us") or "praveengarimella" in email or "vishal" in email:
+        if email.endswith("@isb.edu") or email.endswith(".isb.edu"):
+            is_allowed = True
+        elif not MICROSOFT_CLIENT_ID and "vishal" in email:
             is_allowed = True
         if not is_allowed:
             return render_register(error=f"All group member emails must belong to the @isb.edu domain. Checked: {email}")
