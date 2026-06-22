@@ -773,24 +773,38 @@ async def upload_projects(
                                f"Found: {', '.join(raw_headers)}")
 
     def get_cell_str(row, key):
-        if key not in col:
+        if key not in col or col[key] >= len(row):
             return ""
         return str(row[col[key]].value or "").strip()
 
+    def get_cell_val(row, key):
+        if key not in col or col[key] >= len(row):
+            return None
+        return row[col[key]].value
+
     uploaded = updated = 0
-    for row in ws.iter_rows(min_row=2, values_only=False):
+    for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=False), start=2):
+        # Skip completely empty rows
+        if not any(cell.value is not None for cell in row):
+            continue
+            
+        # Guard: Check if the row has the required columns index bounds
+        max_idx = max(col.values())
+        if len(row) <= max_idx:
+            return dashboard(error=f"Row {row_idx} is incomplete or has missing columns. Please check your data.")
+
         pid = str(row[col["elp_project_id"]].value or "").strip()
         if not pid:
             continue
         data = dict(
-            title=cell_to_html(row[col["title"]].value).strip(),
+            title=cell_to_html(get_cell_val(row, "title")).strip(),
             industry_type_1=get_cell_str(row, "industry_type_1"),
             industry_type_2=get_cell_str(row, "industry_type_2"),
             problem_category_1=get_cell_str(row, "problem_category_1"),
             problem_category_2=get_cell_str(row, "problem_category_2"),
             problem_category_3=get_cell_str(row, "problem_category_3"),
-            problem_description=cell_to_html(row[col["problem_description"]].value),
-            expected_outcomes=cell_to_html(row[col["expected_outcomes"]].value),
+            problem_description=cell_to_html(get_cell_val(row, "problem_description")),
+            expected_outcomes=cell_to_html(get_cell_val(row, "expected_outcomes")),
         )
         existing = db.query(Project).filter(Project.elp_project_id == pid).first()
         if existing:
