@@ -442,7 +442,7 @@ async def register_group(
     if not user_email:
         return RedirectResponse(url="/landing-login", status_code=303)
         
-    group_id = "ELP" + group_id_suffix.strip().upper()
+    group_id = "ELP" + s1_roll.strip().upper()
     s1_email = user_email
     
     s2_email = s2_email.strip().lower()
