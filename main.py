@@ -207,7 +207,7 @@ def get_projects_context(db: Session):
             "expected_outcomes": p.expected_outcomes,
         }
         for p in projects
-    })
+    }).replace("<", "\\u003c")
     return {
         "projects": projects,
         "industries": industries,
