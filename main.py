@@ -930,22 +930,37 @@ async def upload_roster(
         readable = [m.replace("_", " ").title() for m in missing]
         return dashboard(error=f"Could not find these columns: {', '.join(readable)}. Found: {', '.join(raw_headers)}")
 
-    uploaded = 0
-    # Clear the existing roster
-    db.query(StudentRoster).delete()
-    db.commit()
+    # Collect the new StudentRoster records first to ensure transactional integrity
+    new_roster_entries = []
+    for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        # Skip completely empty rows
+        if not any(val is not None for val in row):
+            continue
+            
+        # Verify row contains all expected columns
+        max_idx = max(col.values())
+        if len(row) <= max_idx:
+            return dashboard(error=f"Row {row_idx} is incomplete or has missing columns. Please check your data.")
 
-    for row in ws.iter_rows(min_row=2, values_only=True):
         roll = str(row[col["roll_number"]] or "").strip()
         name = str(row[col["name"]] or "").strip()
         email = str(row[col["email"]] or "").strip().lower()
         if not roll or not name or not email:
             continue
         
-        db.add(StudentRoster(roll_number=roll, name=name, email=email))
-        uploaded += 1
+        new_roster_entries.append(StudentRoster(roll_number=roll, name=name, email=email))
 
-    db.commit()
+    # All rows parsed successfully! Clear existing and add new ones in a transaction
+    try:
+        db.query(StudentRoster).delete()
+        for entry in new_roster_entries:
+            db.add(entry)
+        db.commit()
+    except Exception as commit_err:
+        db.rollback()
+        return dashboard(error=f"Database error while saving roster: {commit_err}")
+
+    uploaded = len(new_roster_entries)
     return dashboard(success=f"Done — Roster updated with {uploaded} students.")
 
 
