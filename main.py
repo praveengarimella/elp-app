@@ -363,21 +363,7 @@ async def auth_callback(request: Request, code: str = None, state: str = None, e
     request.session["user_name"] = name
     request.session["user_picture"] = ""
     
-    # Check if the user is already part of a group
-    group = db.query(Group).filter(
-        or_(
-            Group.student_1_email == email,
-            Group.student_2_email == email,
-            Group.student_3_email == email,
-            Group.student_4_email == email,
-            Group.student_5_email == email,
-        )
-    ).first()
-    
-    if group:
-        return RedirectResponse(url=f"/submit/{group.token}", status_code=303)
-    else:
-        return RedirectResponse(url="/register", status_code=303)
+    return RedirectResponse(url="/", status_code=303)
 
 
 
