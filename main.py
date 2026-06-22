@@ -52,7 +52,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from database import Base, engine, get_db
 from models import Group, Preference, Project
@@ -191,7 +191,13 @@ def get_user_group(db: Session, user_email: str):
     ).first()
 
 
+PROJECTS_CACHE = None
+
 def get_projects_context(db: Session):
+    global PROJECTS_CACHE
+    if PROJECTS_CACHE is not None:
+        return PROJECTS_CACHE
+
     projects = sorted(db.query(Project).all(), key=natural_key)
     industries = sorted({v for p in projects for v in [p.industry_type_1, p.industry_type_2] if v})
     problem_types = sorted({v for p in projects for v in [p.problem_category_1, p.problem_category_2, p.problem_category_3] if v})
@@ -208,12 +214,14 @@ def get_projects_context(db: Session):
         }
         for p in projects
     }).replace("<", "\\u003c")
-    return {
+    
+    PROJECTS_CACHE = {
         "projects": projects,
         "industries": industries,
         "problem_types": problem_types,
         "projects_json": projects_json,
     }
+    return PROJECTS_CACHE
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -527,32 +535,32 @@ async def register_group(
             else:
                 return render_register(error=f"Group {group_id} is already registered by another representative.")
 
-    # 4. Check if any member (roll OR email) is already registered in ANY group
-    for email in emails:
-        already_in_group = db.query(Group).filter(
-            or_(
-                Group.student_1_email == email,
-                Group.student_2_email == email,
-                Group.student_3_email == email,
-                Group.student_4_email == email,
-                Group.student_5_email == email,
-            )
-        ).first()
-        if already_in_group:
-            return render_register(error=f"Student email {email} is already registered in group {already_in_group.group_id}.")
+    # 4. Check if any member (roll OR email) is already registered in ANY group in a single query
+    conflicts = db.query(Group).filter(
+        or_(
+            Group.student_1_email.in_(emails),
+            Group.student_2_email.in_(emails),
+            Group.student_3_email.in_(emails),
+            Group.student_4_email.in_(emails),
+            Group.student_5_email.in_(emails),
+            Group.student_1_roll.in_(rolls),
+            Group.student_2_roll.in_(rolls),
+            Group.student_3_roll.in_(rolls),
+            Group.student_4_roll.in_(rolls),
+            Group.student_5_roll.in_(rolls),
+        )
+    ).all()
 
-    for r in rolls:
-        already_in_group = db.query(Group).filter(
-            or_(
-                Group.student_1_roll == r,
-                Group.student_2_roll == r,
-                Group.student_3_roll == r,
-                Group.student_4_roll == r,
-                Group.student_5_roll == r,
-            )
-        ).first()
-        if already_in_group:
-            return render_register(error=f"Student roll number {r} is already registered in group {already_in_group.group_id}.")
+    if conflicts:
+        for c_group in conflicts:
+            c_emails = {c_group.student_1_email, c_group.student_2_email, c_group.student_3_email, c_group.student_4_email, c_group.student_5_email}
+            c_rolls = {c_group.student_1_roll, c_group.student_2_roll, c_group.student_3_roll, c_group.student_4_roll, c_group.student_5_roll}
+            for email in emails:
+                if email in c_emails:
+                    return render_register(error=f"Student email {email} is already registered in group {c_group.group_id}.")
+            for r in rolls:
+                if r in c_rolls:
+                    return render_register(error=f"Student roll number {r} is already registered in group {c_group.group_id}.")
 
     group = Group(
         group_id=group_id,
@@ -575,7 +583,9 @@ def submit_page(token: str, request: Request, db: Session = Depends(get_db)):
     user_email = request.session.get("user_email")
     if not user_email:
         return RedirectResponse(url="/landing-login", status_code=303)
-    group = db.query(Group).filter(Group.token == token).first()
+    group = db.query(Group).options(
+        joinedload(Group.preferences).joinedload(Preference.project)
+    ).filter(Group.token == token).first()
     if not group:
         return templates.TemplateResponse("not_found.html", {"request": request}, status_code=404)
 
@@ -683,7 +693,9 @@ def download_preferences(token: str, request: Request, db: Session = Depends(get
     user_email = request.session.get("user_email")
     if not user_email:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    group = db.query(Group).filter(Group.token == token).first()
+    group = db.query(Group).options(
+        joinedload(Group.preferences).joinedload(Preference.project)
+    ).filter(Group.token == token).first()
     if not group or not group.is_submitted:
         raise HTTPException(status_code=404)
 
@@ -825,6 +837,9 @@ async def upload_projects(
             return None
         return row[col[key]].value
 
+    # Bulk-fetch all existing projects to prevent N+1 database queries
+    existing_projects = {p.elp_project_id: p for p in db.query(Project).all()}
+
     uploaded = updated = 0
     for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=False), start=2):
         # Skip completely empty rows
@@ -849,16 +864,23 @@ async def upload_projects(
             problem_description=cell_to_html(get_cell_val(row, "problem_description")),
             expected_outcomes=cell_to_html(get_cell_val(row, "expected_outcomes")),
         )
-        existing = db.query(Project).filter(Project.elp_project_id == pid).first()
-        if existing:
+        if pid in existing_projects:
+            existing = existing_projects[pid]
             for k, v in data.items():
                 setattr(existing, k, v)
             updated += 1
         else:
-            db.add(Project(elp_project_id=pid, **data))
+            new_project = Project(elp_project_id=pid, **data)
+            db.add(new_project)
+            existing_projects[pid] = new_project
             uploaded += 1
 
     db.commit()
+    
+    # Invalidate in-memory projects context cache
+    global PROJECTS_CACHE
+    PROJECTS_CACHE = None
+    
     return dashboard(success=f"Done — {uploaded} new projects added, {updated} updated.")
 
 
@@ -881,7 +903,9 @@ def export_preferences(db: Session = Depends(get_db), _=Depends(require_admin)):
         "Submitted At",
     ])
 
-    groups = db.query(Group).filter(Group.is_submitted == True).order_by(Group.submitted_at).all()
+    groups = db.query(Group).options(
+        joinedload(Group.preferences)
+    ).filter(Group.is_submitted == True).order_by(Group.submitted_at).all()
     for group in groups:
         pref_ids = [p.elp_project_id for p in sorted(group.preferences, key=lambda x: x.rank)]
         while len(pref_ids) < 10:
