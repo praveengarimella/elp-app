@@ -471,6 +471,28 @@ async def register_group(
             },
         }, status_code=400)
 
+    # 0. Enforce all fields are non-empty after stripping
+    required_fields = {
+        "Group ID Suffix": group_id_suffix,
+        "Student 1 Name": s1_name,
+        "Student 1 Roll Number": s1_roll,
+        "Student 2 Name": s2_name,
+        "Student 2 Roll Number": s2_roll,
+        "Student 2 Email": s2_email,
+        "Student 3 Name": s3_name,
+        "Student 3 Roll Number": s3_roll,
+        "Student 3 Email": s3_email,
+        "Student 4 Name": s4_name,
+        "Student 4 Roll Number": s4_roll,
+        "Student 4 Email": s4_email,
+        "Student 5 Name": s5_name,
+        "Student 5 Roll Number": s5_roll,
+        "Student 5 Email": s5_email,
+    }
+    for field_name, value in required_fields.items():
+        if not value or not value.strip():
+            return render_register(error=f"{field_name} cannot be empty or contain only whitespace.")
+
     # 1. Enforce that all email domains are isb.edu (with dev bypass)
     for email in emails:
         is_allowed = False
