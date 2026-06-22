@@ -626,6 +626,9 @@ async def submit_preferences(
             "user_group_id": group.group_id,
         }, status_code=400)
 
+    # Clear any existing preferences for this group before saving the new ones (prevents unique constraint errors on resubmission)
+    db.query(Preference).filter(Preference.group_id == group.group_id).delete()
+
     for rank, pid in enumerate(prefs, start=1):
         db.add(Preference(group_id=group.group_id, elp_project_id=pid, rank=rank))
 
