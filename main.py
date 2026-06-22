@@ -626,6 +626,21 @@ async def submit_preferences(
             "user_group_id": group.group_id,
         }, status_code=400)
 
+    # Verify all 10 project IDs exist in the database
+    valid_count = db.query(Project).filter(Project.elp_project_id.in_(prefs)).count()
+    if valid_count != 10:
+        return templates.TemplateResponse("submit.html", {
+            "request": request,
+            "group": group,
+            "token": token,
+            **get_projects_context(db),
+            "error": "One or more selected projects do not exist in the catalog. Please refresh and try again.",
+            "user_email": user_email,
+            "user_name": request.session.get("user_name", ""),
+            "user_token": token,
+            "user_group_id": group.group_id,
+        }, status_code=400)
+
     for rank, pid in enumerate(prefs, start=1):
         db.add(Preference(group_id=group.group_id, elp_project_id=pid, rank=rank))
 
