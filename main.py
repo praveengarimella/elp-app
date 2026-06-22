@@ -349,7 +349,8 @@ async def auth_callback(request: Request, code: str = None, state: str = None, e
             "error": f"Access restricted. Email '{email}' does not belong to the @isb.edu domain."
         }, status_code=403)
         
-    # User is authorized! Set session
+    # User is authorized! Clear old session keys to prevent session fixation and set new values
+    request.session.clear()
     request.session["user_email"] = email
     request.session["user_name"] = name
     request.session["user_picture"] = ""
