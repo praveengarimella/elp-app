@@ -58,3 +58,12 @@ class Preference(Base):
 
     group = relationship("Group", back_populates="preferences")
     project = relationship("Project")
+
+
+class StudentRoster(Base):
+    __tablename__ = "student_roster"
+
+    roll_number = Column(String, primary_key=True)
+    name = Column(String, nullable=False)
+    email = Column(String, nullable=False, unique=True, index=True)
+
